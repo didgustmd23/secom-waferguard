@@ -20,6 +20,7 @@ Thumbs.db
 
 # Raw data
 data/raw/
+!data/raw/.gitkeep
 
 # Temporary files
 *.tmp
@@ -29,4 +30,4 @@ data/raw/
 *.data
 *.csv
 *.xls
-*.txt
+
