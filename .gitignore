@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual Environment
+.venv/
+venv/
+ml310/
+
+# VS Code
+.vscode/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Raw data
+data/raw/
+
+# Temporary files
+*.tmp
+*.log
+
+# Data
+*.data
+*.csv
+*.xls
+*.txt
