@@ -45,14 +45,27 @@ Model freeze → Final test (once) → Model bundle
 
 ### B — 양현승 (모델링·평가)
 
-- [ ] Recall, PR-AUC/AP, Precision, F1, ROC-AUC 평가 기준 확정
-- [ ] Baseline과 후보 모델의 비교 조건 설계
-- [ ] PCA·L1·Feature Importance 기반 특징 선택 전략 설계
+- [x] Recall, PR-AUC/AP, Precision, F1, ROC-AUC 평가 기준 확정
+- [x] Baseline과 후보 모델의 비교 조건 설계
+- [x] PCA·L1·Feature Importance 기반 특징 선택 전략 설계
+
+#### B 결정 사항
+
+- Fail label은 `1`로 고정한다. 모델 비교에서는 AP와 Fail Recall을 핵심 지표로, Precision·F1·ROC-AUC를 보조 지표로 기록한다.
+  - **이유:** 모든 평가 함수와 confusion matrix에서 불량 클래스를 일관되게 해석하기 위해서다. Recall은 불량을 정상으로 놓치는 False Negative 위험을, AP는 불량 비율이 낮은 데이터에서 threshold와 무관한 순위 성능을 확인한다.
+- 후보 모델 비교는 Test를 제외한 학습 데이터에서 `RepeatedStratifiedKFold(5 folds × 5 repeats, random_state=42)`로 수행한다. 후보 비교의 threshold는 `0.50`으로 고정하며, 최종 threshold는 Day 4 OOF prediction에서만 결정한다.
+  - **이유:** 약 104개의 적은 Fail 표본으로 한 번의 split에 의존하지 않기 위해 반복 계층 CV를 사용한다. 모델 비교와 운영 threshold 결정을 분리해 공정한 비교를 유지하고, Test set의 사후 최적화를 막는다.
+- Baseline은 `SimpleImputer(median) → StandardScaler → LogisticRegression` Pipeline으로 구현한다. 후보는 L1 Logistic Regression, RBF SVM, Random Forest, LightGBM으로 구성한다.
+  - **이유:** Baseline은 결측·스케일 차이가 있는 고차원 수치 데이터에서 빠르고 해석 가능한 기준점이 된다. 후보 모델은 희소 선형 관계, 비선형 경계, 센서 간 상호작용을 각각 검증하기 위해 선택한다.
+- PCA는 누적 설명분산 90% 기준으로 비교한다. L1과 Feature Importance 기반 Top-K(100/50/30/20/10) 선택은 반드시 각 CV 학습 fold 내부에서 fit한다.
+  - **이유:** PCA·L1·Importance는 각각 분산 보존, 희소 센서 선택, 공정 해석 가능성 측면의 장단점이 다르다. 선택기를 검증 fold까지 포함해 fit하면 센서 선택 자체가 데이터 누수가 되므로 학습 fold 안에서만 fit한다.
+- 모든 비교는 같은 split·난수 시드·평가 함수·입력 특징 정의를 사용한다. tree 모델에는 scaling을 강제하지 않지만, 결측치 처리와 특징 선택은 Pipeline 내부에서 수행한다.
+  - **이유:** 모델 외 조건을 고정해야 성능 차이를 모델·특징 선택 방식의 차이로 해석할 수 있다. tree 기반 모델은 값의 scale에 민감하지 않지만, Logistic Regression·SVM·PCA는 scale에 민감하므로 model-specific Pipeline을 사용한다.
 
 ### 공동
 
 - [ ] Random / Time-based split 계획 및 leakage 검토
-- [ ] Python 환경과 `requirements.txt` 구성 확인
+- [x] Python 환경과 `requirements.txt` 구성 확인
 
 **예정 산출물:** `data/processed/secom_merged.csv`, `logs/dataset_log.csv`, `src/step1_merge_data.py`, `src/step2_data_check.py`
 

@@ -1,0 +1,42 @@
+{
+  "experiment": {
+    "random_state": 42,
+    "positive_label": 1,
+    "default_threshold": 0.5,
+    "missing_ratio_threshold": 0.5,
+    "pca_explained_variance": 0.9,
+    "cross_validation": {
+      "n_splits": 5,
+      "n_repeats": 5
+    }
+  },
+  "metrics": {
+    "primary": [
+      "average_precision",
+      "recall"
+    ],
+    "secondary": [
+      "precision",
+      "f1",
+      "roc_auc"
+    ]
+  },
+  "feature_selection": {
+    "top_k_feature_counts": [
+      100,
+      50,
+      30,
+      20,
+      10
+    ]
+  },
+  "models": {
+    "baseline": "logistic_regression",
+    "candidates": [
+      "logistic_regression_l1",
+      "rbf_svm",
+      "random_forest",
+      "lightgbm"
+    ]
+  }
+}

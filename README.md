@@ -99,6 +99,12 @@ Windows PowerShell에서는 가상환경을 활성화한 뒤 의존성을 설치
 pip install -r requirements.txt
 ```
 
+### 실험 설정
+
+모델링의 공통 실험 조건은 루트의 `config.json`에서 관리합니다. 난수 시드, Fail label, 기본 threshold, 반복 교차 검증 횟수, 평가 지표, 특징 선택 Top-K, 후보 모델 목록을 수정할 수 있습니다.
+
+`src/modeling_config.py`는 `config.json`을 읽고 자료형·범위를 검증해 모든 모델링 단계에서 같은 설정을 사용하도록 합니다. `src/modeling_metrics.py`는 Fail label(`1`) 기준의 Recall, AP, Precision, F1, ROC-AUC와 confusion matrix를 공통으로 계산합니다.
+
 UCI의 원본 센서 데이터와 Label/Timestamp 파일은 `data/raw/`에 저장합니다. 원본 파일은 수정하지 않고, 모든 변환은 스크립트로 재현합니다.
 
 구현 완료 후의 실행 순서는 다음과 같습니다.
@@ -120,11 +126,15 @@ python src/step8_test.py
 secom-waferguard/
 ├── README.md
 ├── requirements.txt
+├── config.json              # 모델링 공통 실험 조건
 ├── data/
 │   ├── raw/                 # 수정하지 않는 원본 데이터
 │   ├── processed/           # 병합·정제 데이터
 │   └── splits/              # 데이터 분할 정보
-├── src/                     # 전처리, 학습, 평가, 추론 코드
+├── src/
+│   ├── modeling_config.py   # config.json 로드·검증
+│   ├── modeling_metrics.py  # Fail 중심 공통 평가 함수
+│   └── ...                  # 전처리, 학습, 평가, 추론 코드
 ├── logs/                    # 데이터·실험 결과 CSV
 ├── models/                  # model.joblib, model_card.json
 └── reports/                 # 프로젝트 분석 보고서 및 결과 시각화
