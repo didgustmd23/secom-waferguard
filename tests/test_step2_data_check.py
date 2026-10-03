@@ -40,13 +40,15 @@ class Step2DataCheckTest(unittest.TestCase):
             }
         )
 
-        quality_log, high_missing_columns, zero_variance_columns = build_quality_log(
-            dataframe, self.dataset
-        )
+        quality_log = build_quality_log(dataframe, self.dataset)
 
-        self.assertEqual(high_missing_columns, ("sensor_sparse",))
-        self.assertEqual(zero_variance_columns, ("sensor_constant",))
         self.assertIn("eda_only", quality_log["action"].tolist())
+        high_missing_candidate = quality_log.loc[
+            (quality_log["category"] == "feature_missing_ratio")
+            & (quality_log["item"] == "sensor_sparse"),
+            "action",
+        ].iloc[0]
+        self.assertEqual(high_missing_candidate, "eda_candidate_drop")
         parse_failure = quality_log.loc[
             (quality_log["category"] == "timestamp")
             & (quality_log["item"] == "parse_failure_count"),

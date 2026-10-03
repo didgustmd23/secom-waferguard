@@ -10,6 +10,7 @@ import unittest
 
 import pandas as pd
 
+from src.modeling_config import MODELING_CONFIG
 from src.modeling_metrics import evaluate_binary_scores
 
 
@@ -21,6 +22,7 @@ class ModelingMetricsTest(unittest.TestCase):
             [0.1, 0.9, 0.7, 0.3],
             positive_label=1,
             negative_label=-1,
+            threshold=MODELING_CONFIG.experiment.default_threshold,
         )
 
         self.assertEqual(result.true_negative, 1)
@@ -35,6 +37,7 @@ class ModelingMetricsTest(unittest.TestCase):
             [0.1, 0.9],
             positive_label=1,
             negative_label=0,
+            threshold=MODELING_CONFIG.experiment.default_threshold,
         )
 
         self.assertEqual(result.positive_support, 1)
@@ -48,6 +51,7 @@ class ModelingMetricsTest(unittest.TestCase):
                 [0.1, 0.9, 0.2],
                 positive_label=1,
                 negative_label=-1,
+                threshold=MODELING_CONFIG.experiment.default_threshold,
             )
 
     # None, NaN, pd.NA를 모두 결측 Label로 차단하는지 확인
@@ -60,4 +64,5 @@ class ModelingMetricsTest(unittest.TestCase):
                         [0.1, 0.9, 0.2],
                         positive_label=1,
                         negative_label=-1,
+                        threshold=MODELING_CONFIG.experiment.default_threshold,
                     )

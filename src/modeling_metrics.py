@@ -72,7 +72,7 @@ class BinaryMetrics:
 #
 # threshold:
 # - positive_scores가 Fail로 분류되는 기준값
-# - 후보 모델 비교는 0.50으로 고정하고 Day 4에서 별도 탐색
+# - 호출부가 config.json의 후보 비교 기준값 또는 Day 4의 확정값을 명시적으로 전달
 # ==========================================
 def evaluate_binary_scores(
     y_true: Iterable[object],
@@ -80,7 +80,7 @@ def evaluate_binary_scores(
     *,
     positive_label: object,
     negative_label: object,
-    threshold: float = 0.50,
+    threshold: float,
 ) -> BinaryMetrics:
     # Threshold는 확률 기준값이므로 0~1 범위만 허용
     if not 0.0 <= threshold <= 1.0:

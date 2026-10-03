@@ -1,7 +1,7 @@
 # ==========================================
-# Dataset Profile 기반 SECOM 원본 데이터 병합
-# - SECOM의 두 원본 파일을 label·timestamp·sensor가 있는 canonical table로 변환
-# - 원본 파일 경로·구분자·metadata 컬럼 순서는 Dataset Profile에서 읽음
+# Dataset Profile 기반 원본 데이터 병합
+# - Profile에 선언된 source를 label·timestamp·feature가 있는 canonical table로 변환
+# - 원본 파일 경로·읽기 옵션·metadata 컬럼 순서는 Dataset Profile에서 읽음
 # - 행 수·metadata 구조·Label·feature 구성을 저장 전에 검증
 # - 다른 원본 형식은 별도 ingestion adapter를 추가하고, 이후 코어 단계는 재사용
 # ==========================================
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Callable
 
 import pandas as pd
 
@@ -33,68 +34,98 @@ except ModuleNotFoundError:
 
 
 # ==========================================
-# SECOM whitespace pair 형식의 sensor·metadata 파일 병합
-# - sensor 파일은 공백으로 구분된 수치 feature 행렬
-# - metadata 파일은 Profile의 metadata_columns 순서대로 Label·Timestamp를 포함
+# feature·metadata pair 형식의 원본 파일 병합
+# - source 이름·읽기 옵션·metadata 컬럼 순서는 adapter_options에서 읽음
+# - prefix 방식이면 이름 없는 feature 열에 Profile 접두어와 순번을 부여
 # - 두 파일의 행 수가 다르면 concat 전에 오류를 발생시켜 행 정렬 오류를 차단
 # ==========================================
-def merge_secom_whitespace_pair(
+def merge_feature_metadata_pair(
     dataset: DatasetSpec, ingestion: IngestionSpec
 ) -> pd.DataFrame:
-    # SECOM adapter가 필요한 원본 파일 경로와 공백 구분자를 Profile에서 읽음
-    sensor_frame = pd.read_csv(
-        ingestion.sensor_path,
-        sep=ingestion.separator,
-        header=None,
+    # adapter가 사용할 source 이름과 metadata 컬럼 순서를 Profile에서 읽음
+    options = ingestion.adapter_options
+    feature_source_name = options.get("feature_source")
+    metadata_source_name = options.get("metadata_source")
+    metadata_columns = options.get("metadata_columns")
+    if not isinstance(feature_source_name, str) or not feature_source_name:
+        raise ValueError("feature_metadata_pair requires adapter_options.feature_source")
+    if not isinstance(metadata_source_name, str) or not metadata_source_name:
+        raise ValueError("feature_metadata_pair requires adapter_options.metadata_source")
+    if not isinstance(metadata_columns, list) or not metadata_columns or not all(
+        isinstance(column, str) and column for column in metadata_columns
+    ):
+        raise ValueError(
+            "feature_metadata_pair requires non-empty adapter_options.metadata_columns"
+        )
+    if len(metadata_columns) != len(set(metadata_columns)):
+        raise ValueError("adapter_options.metadata_columns must not contain duplicates")
+
+    # source마다 Profile이 선언한 pandas read_csv 옵션을 그대로 적용한다.
+    feature_source = ingestion.get_source(feature_source_name)
+    metadata_source = ingestion.get_source(metadata_source_name)
+    feature_frame = pd.read_csv(
+        feature_source.path,
+        **feature_source.read_csv_options,
     )
     metadata_frame = pd.read_csv(
-        ingestion.metadata_path,
-        sep=ingestion.separator,
-        header=None,
+        metadata_source.path,
+        **metadata_source.read_csv_options,
     )
 
     # 원본 두 파일은 동일한 wafer 행 순서를 공유해야 하므로 행 수를 먼저 검증
-    if len(sensor_frame) != len(metadata_frame):
+    if len(feature_frame) != len(metadata_frame):
         raise ValueError(
-            "sensor and metadata row counts must match: "
-            f"{len(sensor_frame)} != {len(metadata_frame)}"
+            "feature and metadata row counts must match: "
+            f"{len(feature_frame)} != {len(metadata_frame)}"
         )
 
     # metadata 열 수와 순서가 Profile 정의와 다르면 Label·Timestamp 정렬을 신뢰할 수 없음
-    if metadata_frame.shape[1] != len(ingestion.metadata_columns):
+    if metadata_frame.shape[1] != len(metadata_columns):
         raise ValueError(
-            "metadata column count does not match ingestion.metadata_columns: "
-            f"{metadata_frame.shape[1]} != {len(ingestion.metadata_columns)}"
+            "metadata column count does not match adapter_options.metadata_columns: "
+            f"{metadata_frame.shape[1]} != {len(metadata_columns)}"
         )
 
     # Label과 timestamp 열의 의미가 Profile 정의와 일치하는지 먼저 확인한다.
     expected_metadata_columns = [dataset.label_column]
     if dataset.timestamp_column is not None:
         expected_metadata_columns.append(dataset.timestamp_column)
-    if list(ingestion.metadata_columns) != expected_metadata_columns:
+    if metadata_columns != expected_metadata_columns:
         raise ValueError(
-            "ingestion.metadata_columns must match Dataset Profile label/timestamp "
+            "adapter_options.metadata_columns must match Dataset Profile label/timestamp "
             f"columns: expected={expected_metadata_columns}, "
-            f"actual={list(ingestion.metadata_columns)}"
+            f"actual={metadata_columns}"
         )
 
-    metadata_frame.columns = ingestion.metadata_columns
+    metadata_frame.columns = metadata_columns
 
-    # prefix 방식의 Profile에서만 SECOM sensor 컬럼명을 일관되게 생성
-    if dataset.feature_selection_mode != "prefix" or not dataset.feature_column_prefix:
-        raise ValueError("secom_whitespace_pair requires a non-empty feature column prefix")
-    sensor_frame.columns = [
-        f"{dataset.feature_column_prefix}{index}"
-        for index in range(sensor_frame.shape[1])
-    ]
+    # 이름 없는 feature 행렬은 prefix 방식에서만 안전하게 canonical 컬럼명으로 변환한다.
+    if dataset.feature_selection_mode == "prefix":
+        if not dataset.feature_column_prefix:
+            raise ValueError("prefix mode requires a non-empty feature column prefix")
+        feature_frame.columns = [
+            f"{dataset.feature_column_prefix}{index}"
+            for index in range(feature_frame.shape[1])
+        ]
+    elif not all(isinstance(column, str) and column for column in feature_frame.columns):
+        raise ValueError(
+            "all_except_metadata mode requires named feature columns from the source"
+        )
 
-    # metadata와 sensor를 같은 행 순서로 결합해 canonical table을 생성
-    merged_frame = pd.concat([metadata_frame, sensor_frame], axis=1)
+    # metadata와 feature를 같은 행 순서로 결합해 canonical table을 생성
+    merged_frame = pd.concat([metadata_frame, feature_frame], axis=1)
 
     # 일반 schema 검증으로 Profile의 Label·feature 정의와 병합 결과를 대조
     validate_dataset_frame(merged_frame, dataset)
 
     return merged_frame
+
+
+# adapter 등록부를 한 곳에 모아 merge_dataset의 데이터셋별 분기를 제거한다.
+IngestionAdapter = Callable[[DatasetSpec, IngestionSpec], pd.DataFrame]
+INGESTION_ADAPTERS: dict[str, IngestionAdapter] = {
+    "feature_metadata_pair": merge_feature_metadata_pair,
+}
 
 
 # ==========================================
@@ -113,11 +144,11 @@ def merge_dataset(config_path: Path | str, output_path: Path | None = None) -> P
     if ingestion is None:
         raise ValueError(f"dataset '{dataset.dataset_id}' does not define ingestion settings")
 
-    # adapter 이름으로 원본 형식별 처리기를 선택
-    if ingestion.adapter == "secom_whitespace_pair":
-        merged_frame = merge_secom_whitespace_pair(dataset, ingestion)
-    else:
+    # registry에서 원본 형식별 처리기를 선택한다.
+    adapter = INGESTION_ADAPTERS.get(ingestion.adapter)
+    if adapter is None:
         raise ValueError(f"unsupported ingestion adapter: {ingestion.adapter}")
+    merged_frame = adapter(dataset, ingestion)
 
     # 호출자가 경로를 주지 않으면 Profile의 canonical input_path를 사용
     destination = output_path or dataset.input_path
@@ -125,10 +156,10 @@ def merge_dataset(config_path: Path | str, output_path: Path | None = None) -> P
     merged_frame.to_csv(destination, index=False)
 
     # 재실행 확인에 필요한 최소 결과를 콘솔에 기록
-    print(f"dataset_id: {dataset.dataset_id}")
-    print(f"output_path: {destination}")
-    print(f"shape: {merged_frame.shape}")
-    print(f"label_counts:\n{merged_frame[dataset.label_column].value_counts()}")
+    print(f"데이터셋 ID: {dataset.dataset_id}")
+    print(f"저장 경로: {destination}")
+    print(f"데이터 크기: {merged_frame.shape}")
+    print(f"레이블 분포:\n{merged_frame[dataset.label_column].value_counts()}")
 
     return destination
 

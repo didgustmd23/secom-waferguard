@@ -21,8 +21,8 @@ except ModuleNotFoundError:
 # ==========================================
 # DatasetSpec 기준으로 모델 입력 feature 컬럼명 결정
 # - prefix: 지정한 접두어를 가진 컬럼만 feature로 선택
-# - all_except_metadata: Label·Timestamp를 제외한 모든 컬럼을 feature로 선택
-# - 필수 metadata 누락·중복 컬럼·feature 부재를 조기에 차단
+# - all_except_metadata: Label·Timestamp·ID·Group·명시적 제외 컬럼을 제외한 모든 컬럼 선택
+# - 필수 역할 컬럼 누락·중복 컬럼·feature 부재·수치형 규칙 위반을 조기에 차단
 # ==========================================
 def resolve_feature_columns(
     column_names: Iterable[str], dataset: DatasetSpec
@@ -34,13 +34,19 @@ def resolve_feature_columns(
     if len(columns) != len(set(columns)):
         raise ValueError("dataset columns must not contain duplicates")
 
-    # Label과 선택적인 Timestamp 컬럼이 실제 입력에 존재하는지 확인
+    # Label·Timestamp·ID·Group·명시적 제외 컬럼이 실제 입력에 존재하는지 확인
     required_columns = [dataset.label_column]
     if dataset.timestamp_column is not None:
         required_columns.append(dataset.timestamp_column)
+    required_columns.extend(dataset.id_columns)
+    required_columns.extend(dataset.group_columns)
+    required_columns.extend(dataset.excluded_feature_columns)
     missing_columns = [column for column in required_columns if column not in columns]
     if missing_columns:
         raise ValueError(f"dataset is missing required columns: {missing_columns}")
+
+    # 모델 입력에서 제외할 역할 컬럼을 먼저 구성한다.
+    non_feature_columns = set(required_columns)
 
     # Profile이 지정한 방식으로 feature 후보를 일관되게 선택
     if dataset.feature_selection_mode == "prefix":
@@ -48,10 +54,12 @@ def resolve_feature_columns(
             column
             for column in columns
             if column.startswith(dataset.feature_column_prefix or "")
+            and column not in non_feature_columns
         )
     elif dataset.feature_selection_mode == "all_except_metadata":
-        metadata_columns = set(required_columns)
-        feature_columns = tuple(column for column in columns if column not in metadata_columns)
+        feature_columns = tuple(
+            column for column in columns if column not in non_feature_columns
+        )
     else:
         # load_dataset_spec이 이미 검증하지만 직접 DatasetSpec을 만들었을 때도 방어
         raise ValueError(f"unsupported feature selection mode: {dataset.feature_selection_mode}")
@@ -84,6 +92,26 @@ def validate_dataset_frame(dataframe: pd.DataFrame, dataset: DatasetSpec) -> tup
         raise ValueError(
             f"dataset column '{dataset.label_column}' contains unsupported labels: "
             f"{invalid_labels}"
+        )
+
+    # Profile에 명시된 범주형 feature만 문자열·category dtype을 허용한다.
+    categorical_columns = set(dataset.categorical_feature_columns)
+    unknown_categorical_columns = sorted(categorical_columns - set(feature_columns))
+    if unknown_categorical_columns:
+        raise ValueError(
+            "profile categorical feature columns are not selected features: "
+            f"{unknown_categorical_columns}"
+        )
+    non_numeric_columns = [
+        column
+        for column in feature_columns
+        if column not in categorical_columns
+        and not pd.api.types.is_numeric_dtype(dataframe[column])
+    ]
+    if non_numeric_columns:
+        raise ValueError(
+            "non-categorical features must have numeric dtype: "
+            f"{non_numeric_columns}"
         )
 
     return feature_columns

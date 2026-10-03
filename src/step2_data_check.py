@@ -52,11 +52,9 @@ def add_log_record(
 # Dataset Profile 기준 전체 데이터 품질 진단 로그 생성
 # - feature별 결측률과 상수 여부는 EDA 후보 정보로만 계산
 # - Timestamp는 Profile 형식으로 파싱해 실패 수·시간 범위를 기록
-# - 반환값은 로그 DataFrame과 EDA 기준 제거 후보 feature 목록
+# - 반환값은 로그 DataFrame만 제공해 전체 데이터 후보 목록의 모델링 재사용을 차단
 # ==========================================
-def build_quality_log(
-    dataframe: pd.DataFrame, dataset: DatasetSpec
-) -> tuple[pd.DataFrame, tuple[str, ...], tuple[str, ...]]:
+def build_quality_log(dataframe: pd.DataFrame, dataset: DatasetSpec) -> pd.DataFrame:
     # Profile과 실제 DataFrame의 metadata·Label·feature 구성을 먼저 검증
     feature_columns = validate_dataset_frame(dataframe, dataset)
     records: list[dict[str, Any]] = []
@@ -222,8 +220,8 @@ def build_quality_log(
         "eda_only",
     )
 
-    # 전역 feature 제거 결과는 반환만 하고 cleaned CSV로 저장하지 않음
-    return pd.DataFrame(records), high_missing_columns, zero_variance_columns
+    # 전역 feature 제거 후보는 로그로만 남기고 모델 코드에 전달하지 않는다.
+    return pd.DataFrame(records)
 
 
 # ==========================================
@@ -242,9 +240,7 @@ def run_quality_check(
 
     # Step 1이 만든 canonical merged CSV를 읽음
     dataframe = pd.read_csv(dataset.input_path)
-    quality_log, high_missing_columns, zero_variance_columns = build_quality_log(
-        dataframe, dataset
-    )
+    quality_log = build_quality_log(dataframe, dataset)
 
     # 호출자가 경로를 주지 않으면 config.json 위치 기준 logs 폴더에 저장
     destination = output_path or resolved_config_path.parent / "logs" / "dataset_log.csv"
@@ -252,13 +248,23 @@ def run_quality_check(
     quality_log.to_csv(destination, index=False, encoding="utf-8-sig")
 
     # 실행 결과와 EDA 후보 개수를 표시하되, 모델 feature 선택으로 사용하지 않음을 안내
-    print(f"dataset_id: {dataset.dataset_id}")
-    print(f"input_path: {dataset.input_path}")
-    print(f"log_path: {destination}")
-    print(f"shape: {dataframe.shape}")
-    print(f"high_missing_candidates: {len(high_missing_columns)}")
-    print(f"constant_candidates: {len(zero_variance_columns)}")
-    print("note: EDA candidates are not model feature-selection results.")
+    print(f"데이터셋 ID: {dataset.dataset_id}")
+    print(f"입력 경로: {dataset.input_path}")
+    print(f"로그 저장 경로: {destination}")
+    print(f"데이터 크기: {dataframe.shape}")
+    high_missing_count = quality_log.loc[
+        (quality_log["category"] == "feature_summary")
+        & (quality_log["item"] == "high_missing_candidate_count"),
+        "value",
+    ].iloc[0]
+    constant_count = quality_log.loc[
+        (quality_log["category"] == "feature_summary")
+        & (quality_log["item"] == "constant_candidate_count"),
+        "value",
+    ].iloc[0]
+    print(f"결측률 초과 EDA 후보 수: {high_missing_count}")
+    print(f"상수 feature EDA 후보 수: {constant_count}")
+    print("안내: EDA 후보는 모델 feature 선택 결과가 아닙니다.")
 
     return destination
 

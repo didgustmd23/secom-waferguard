@@ -10,8 +10,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.modeling_config import DatasetSpec, IngestionSpec
-from src.step1_merge_data import merge_secom_whitespace_pair
+from src.modeling_config import DatasetSpec, IngestionSourceSpec, IngestionSpec
+from src.step1_merge_data import merge_feature_metadata_pair
 
 
 class Step1MergeDataTest(unittest.TestCase):
@@ -41,14 +41,27 @@ class Step1MergeDataTest(unittest.TestCase):
                 "pass 2024-01-01\nfail 2024-01-02\n", encoding="utf-8"
             )
             ingestion = IngestionSpec(
-                adapter="secom_whitespace_pair",
-                sensor_path=sensor_path,
-                metadata_path=metadata_path,
-                separator=r"\s+",
-                metadata_columns=("target", "event_time"),
+                adapter="feature_metadata_pair",
+                sources=(
+                    IngestionSourceSpec(
+                        name="features",
+                        path=sensor_path,
+                        read_csv_options={"sep": r"\s+", "header": None},
+                    ),
+                    IngestionSourceSpec(
+                        name="metadata",
+                        path=metadata_path,
+                        read_csv_options={"sep": r"\s+", "header": None},
+                    ),
+                ),
+                adapter_options={
+                    "feature_source": "features",
+                    "metadata_source": "metadata",
+                    "metadata_columns": ["target", "event_time"],
+                },
             )
 
-            merged_frame = merge_secom_whitespace_pair(self._dataset(), ingestion)
+            merged_frame = merge_feature_metadata_pair(self._dataset(), ingestion)
 
         self.assertEqual(
             list(merged_frame.columns),
@@ -64,12 +77,25 @@ class Step1MergeDataTest(unittest.TestCase):
             sensor_path.write_text("1.0\n2.0\n", encoding="utf-8")
             metadata_path.write_text("pass 2024-01-01\n", encoding="utf-8")
             ingestion = IngestionSpec(
-                adapter="secom_whitespace_pair",
-                sensor_path=sensor_path,
-                metadata_path=metadata_path,
-                separator=r"\s+",
-                metadata_columns=("target", "event_time"),
+                adapter="feature_metadata_pair",
+                sources=(
+                    IngestionSourceSpec(
+                        name="features",
+                        path=sensor_path,
+                        read_csv_options={"sep": r"\s+", "header": None},
+                    ),
+                    IngestionSourceSpec(
+                        name="metadata",
+                        path=metadata_path,
+                        read_csv_options={"sep": r"\s+", "header": None},
+                    ),
+                ),
+                adapter_options={
+                    "feature_source": "features",
+                    "metadata_source": "metadata",
+                    "metadata_columns": ["target", "event_time"],
+                },
             )
 
             with self.assertRaisesRegex(ValueError, "row counts must match"):
-                merge_secom_whitespace_pair(self._dataset(), ingestion)
+                merge_feature_metadata_pair(self._dataset(), ingestion)

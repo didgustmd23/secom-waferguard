@@ -6,6 +6,11 @@
     "timestamp": "timestamp",
     "timestamp_format": "%d/%m/%Y %H:%M:%S"
   },
+  "column_roles": {
+    "id_columns": [],
+    "group_columns": [],
+    "excluded_feature_columns": []
+  },
   "labels": {
     "negative": -1,
     "positive": 1
@@ -14,18 +19,37 @@
     "selection": "prefix",
     "prefix": "sensor_"
   },
+  "feature_types": {
+    "categorical_columns": []
+  },
   "quality_rules": {
     "missing_ratio_threshold": 0.5,
     "drop_zero_variance": true
   },
   "ingestion": {
-    "adapter": "secom_whitespace_pair",
-    "sensor_path": "data/raw/secom.data",
-    "metadata_path": "data/raw/secom_labels.data",
-    "separator": "\\s+",
-    "metadata_columns": [
-      "label",
-      "timestamp"
-    ]
+    "adapter": "feature_metadata_pair",
+    "sources": [
+      {
+        "name": "features",
+        "path": "data/raw/secom.data",
+        "read_csv_options": {
+          "sep": "\\s+",
+          "header": null
+        }
+      },
+      {
+        "name": "metadata",
+        "path": "data/raw/secom_labels.data",
+        "read_csv_options": {
+          "sep": "\\s+",
+          "header": null
+        }
+      }
+    ],
+    "adapter_options": {
+      "feature_source": "features",
+      "metadata_source": "metadata",
+      "metadata_columns": ["label", "timestamp"]
+    }
   }
 }

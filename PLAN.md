@@ -45,7 +45,7 @@ Model freeze → Final test (once) → Model bundle
 
 #### Day 1 데이터 처리 원칙 및 변경 이유
 
-- 원본 sensor·metadata 병합은 Dataset Profile의 `ingestion` 정의를 사용해 canonical `secom_merged.csv`를 생성한다. 원본 경로, 구분자, label/timestamp 열 순서를 코드에 고정하지 않아 다른 공장 데이터도 Profile과 adapter만 추가해 같은 코어를 재사용할 수 있다.
+- 원본 데이터 병합은 Dataset Profile의 `ingestion` source 목록과 adapter 정의를 사용해 canonical `secom_merged.csv`를 생성한다. 원본 경로·읽기 옵션·결합 규칙을 코드에 고정하지 않아 같은 수집 형식의 다른 공장 데이터는 Profile만으로 처리할 수 있다.
 - `step2_data_check.py`의 결측률 50% 초과·상수 센서 결과는 전체 데이터 EDA용 후보와 근거를 기록하는 용도다. 전역 `secom_cleaned.csv`를 만들거나 그 결과를 모델 입력에 바로 적용하지 않는다. 실제 제거·대치·선택은 Train 또는 CV 학습 fold 안에서 fit해야 validation/test 정보가 학습에 섞이지 않는다.
 - `secom_merged.csv`와 `dataset_log.csv`는 원본 파일과 Profile로 재생성하는 결과물이다. 저장소에는 코드·설정·문서만 유지하고, 결과 CSV는 `.gitignore`로 제외한다.
 
@@ -79,7 +79,7 @@ Model freeze → Final test (once) → Model bundle
   1. **입력 데이터:** 분할과 모델링에는 `data/processed/secom_merged.csv`를 사용한다. `secom_cleaned.csv`는 전체 데이터를 기준으로 만든 EDA·점검용 산출물이므로 모델 입력으로 사용하지 않는다.
   2. **Random split:** `Train/Validation/Test = 70/15/15`로 분할하고, `random_state=42`와 label 계층화(stratify)를 적용한다. 각 split의 원본 행 인덱스를 저장해 재현성과 중복 여부를 확인한다.
   3. **Time-based split:** `timestamp`를 `%d/%m/%Y %H:%M:%S` 형식으로 파싱한 뒤 시간 오름차순으로 정렬한다. 과거 70%를 Train, 중간 15%를 Validation, 최근 15%를 Test로 사용하며 shuffle·stratify는 적용하지 않는다. 같은 timestamp를 가진 행은 경계에서 가능한 한 같은 split에 유지한다.
-  4. **Leakage 방지:** Train·Validation·Test에 같은 원본 행이 포함되지 않도록 검증한다. `label`과 `timestamp`는 모델 입력 특징에서 제외한다. 결측치 대치, scaling, PCA, 특징 선택, 모델 학습은 Train에서만 fit하고 Validation·Test에는 transform/predict만 수행한다.
+  4. **Leakage 방지:** Train·Validation·Test에 같은 원본 행이 포함되지 않도록 검증한다. `label`, `timestamp`, Profile에 선언한 ID·그룹·제외 컬럼은 모델 입력 특징에서 제외한다. 결측치 대치, scaling, PCA, 특징 선택, 모델 학습은 Train에서만 fit하고 Validation·Test에는 transform/predict만 수행한다.
   5. **Test set 봉인:** 후보 모델 비교, 특징 선택, threshold 결정에는 Test를 사용하지 않는다. 최종 모델과 threshold가 확정된 뒤에만 Test 성능을 한 번 평가한다.
   6. **산출물 및 점검 기록:** `src/step3_split_data.py`, split별 행 인덱스 파일, split 요약을 만든다. 요약에는 각 split의 행 수·Fail 비율, Random split 인덱스 중복 여부, Time split의 시간 범위·timestamp 파싱 실패 수·동일 timestamp 처리 기준을 기록한다.
 
