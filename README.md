@@ -6,6 +6,17 @@
 
 실험 일정, 역할 분담, 완료 기준은 [PLAN.md](PLAN.md)에서 관리합니다.
 
+## 현재 구현 상태
+
+| 구분 | 상태 | 내용 |
+| --- | --- | --- |
+| 범용 설정 코어 | 완료 | `config.json`과 Dataset Profile을 분리해 로드·검증 |
+| 데이터 구조 검증 | 완료 | Profile 기준 label·metadata·feature 컬럼 검증 |
+| 공통 평가 | 완료 | Profile label 기반 Recall, AP, Precision, F1, ROC-AUC 계산 |
+| 자동 테스트 | 완료 | 설정·schema·평가 함수 10개 테스트 |
+| 데이터 병합·품질 점검 | 예정 | `step1_merge_data.py`, `step2_data_check.py` |
+| split·baseline·후속 모델링 | 예정 | Day 2~5 계획에 따라 구현 |
+
 ## 프로젝트 목표
 
 - 불량 클래스의 **Recall**과 **PR-AUC (Average Precision)** 를 중심으로 모델을 평가합니다.
@@ -99,15 +110,34 @@ Windows PowerShell에서는 가상환경을 활성화한 뒤 의존성을 설치
 pip install -r requirements.txt
 ```
 
-### 실험 설정
+### 설정 구조
 
-모델링의 공통 실험 조건은 루트의 `config.json`에서 관리합니다. 난수 시드, Fail label, 기본 threshold, 반복 교차 검증 횟수, 평가 지표, 특징 선택 Top-K, 후보 모델 목록을 수정할 수 있습니다.
+범용 코어와 데이터셋별 가정을 분리합니다.
 
-`src/modeling_config.py`는 `config.json`을 읽고 자료형·범위를 검증해 모든 모델링 단계에서 같은 설정을 사용하도록 합니다. `src/modeling_metrics.py`는 Fail label(`1`) 기준의 Recall, AP, Precision, F1, ROC-AUC와 confusion matrix를 공통으로 계산합니다.
+- `config.json`: 난수 시드, 후보 모델 비교용 `default_threshold`, CV처럼 데이터셋과 독립적인 실험 조건
+- `configs/datasets/secom.json`: SECOM의 입력 경로, label 값, timestamp 형식, feature 컬럼 규칙, 데이터 품질 기준
 
-UCI의 원본 센서 데이터와 Label/Timestamp 파일은 `data/raw/`에 저장합니다. 원본 파일은 수정하지 않고, 모든 변환은 스크립트로 재현합니다.
+`src/modeling_config.py`는 두 설정을 함께 읽어 `ModelingConfig`와 `DatasetSpec`으로 검증합니다. `src/dataset_schema.py`는 Profile 기준으로 label·metadata·feature 컬럼을 검증합니다. 따라서 새 데이터셋에는 코어 코드를 고치지 않고 같은 형식의 Dataset Profile을 추가합니다.
 
-구현 완료 후의 실행 순서는 다음과 같습니다.
+`src/modeling_metrics.py`는 Dataset Profile에서 전달받은 정상·불량 label을 기준으로 Recall, AP, Precision, F1, ROC-AUC와 confusion matrix를 공통 계산합니다.
+
+### Dataset Profile 추가
+
+새 데이터셋을 적용할 때는 `configs/datasets/`에 JSON Profile을 추가하고 `config.json`의 `dataset_profile` 경로만 변경합니다. Profile에는 최소한 입력 경로, label 컬럼과 정상·불량 값, timestamp 컬럼·형식(사용 시), feature 선택 방식, 데이터 품질 규칙을 정의합니다.
+
+`prefix` 방식은 지정한 접두어를 가진 컬럼만 feature로 사용합니다. `all_except_metadata` 방식은 label·timestamp를 제외한 모든 컬럼을 feature로 사용합니다. Profile 검증에 실패하면 split·모델링 전에 오류가 발생합니다.
+
+### 자동 테스트
+
+현재 구현된 범용 코어는 아래 명령으로 검증합니다.
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+UCI의 원본 데이터 CSV는 저장소에 포함하지 않습니다. [UCI SECOM Data Set](https://archive.ics.uci.edu/dataset/179/secom)에서 `secom.data`, `secom_labels.data`를 받아 `data/raw/`에 저장합니다. 원본 파일은 수정하지 않고, 이후 병합·품질 점검 Script로 재현 가능한 산출물을 생성합니다.
+
+현재 실행 가능한 코어 검증은 자동 테스트입니다. 아래 데이터 처리·모델링 명령은 Day 2~5 구현 후 사용할 예정입니다.
 
 ```bash
 python src/step1_merge_data.py
@@ -120,21 +150,26 @@ python src/step7_threshold.py
 python src/step8_test.py
 ```
 
-## 예정 디렉터리 구조
+## 프로젝트 디렉터리 구조
 
 ```text
 secom-waferguard/
 ├── README.md
 ├── requirements.txt
-├── config.json              # 모델링 공통 실험 조건
+├── config.json              # 데이터셋과 독립적인 모델링 실험 조건
+├── configs/
+│   └── datasets/
+│       └── secom.json       # SECOM Dataset Profile
 ├── data/
 │   ├── raw/                 # 수정하지 않는 원본 데이터
 │   ├── processed/           # 병합·정제 데이터
 │   └── splits/              # 데이터 분할 정보
 ├── src/
-│   ├── modeling_config.py   # config.json 로드·검증
-│   ├── modeling_metrics.py  # Fail 중심 공통 평가 함수
+│   ├── modeling_config.py   # 공통 실험 설정·Dataset Profile 로드·검증
+│   ├── dataset_schema.py    # Profile 기반 feature·label 구조 검증
+│   ├── modeling_metrics.py  # Dataset Profile label 기반 공통 평가 함수
 │   └── ...                  # 전처리, 학습, 평가, 추론 코드
+├── tests/                   # 설정·schema·평가 함수 자동 테스트
 ├── logs/                    # 데이터·실험 결과 CSV
 ├── models/                  # model.joblib, model_card.json
 └── reports/                 # 프로젝트 분석 보고서 및 결과 시각화
@@ -160,6 +195,10 @@ secom-waferguard/
 - 데이터 규모가 작고 불량 샘플이 적어, 단일 split의 성능만으로 일반화 성능을 보장할 수 없습니다.
 - 센서 중요도는 인과관계를 직접 뜻하지 않으며, 공정 전문가의 검토가 필요합니다.
 - 시간 순서 평가에서 성능이 하락하면 공정 조건 변화 또는 데이터 드리프트를 추가로 분석해야 합니다.
+
+## Legacy Notebook
+
+`src/final_model.ipynb`는 초기 데이터 탐색 과정에서 만든 notebook입니다. 현재 재현 가능한 실행 경로에는 포함하지 않으며, 병합·품질 점검·모델링은 계획된 Script와 범용 코어를 기준으로 구현합니다.
 
 ## License
 

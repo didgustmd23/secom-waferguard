@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass
 from typing import Iterable
 
 import numpy as np
+import pandas as pd
 from sklearn.metrics import (
     average_precision_score,
     confusion_matrix,
@@ -63,7 +64,11 @@ class BinaryMetrics:
 #
 # positive_label:
 # - 원본 Label 중 불량(Fail)을 의미하는 값
-# - SECOM 데이터셋에서는 1을 사용
+# - Dataset Profile에서 읽어 호출부가 명시적으로 전달
+#
+# negative_label:
+# - 원본 Label 중 정상(Pass)을 의미하는 값
+# - Dataset Profile에서 읽어 호출부가 명시적으로 전달
 #
 # threshold:
 # - positive_scores가 Fail로 분류되는 기준값
@@ -73,12 +78,17 @@ def evaluate_binary_scores(
     y_true: Iterable[object],
     positive_scores: Iterable[float],
     *,
-    positive_label: object = 1,
+    positive_label: object,
+    negative_label: object,
     threshold: float = 0.50,
 ) -> BinaryMetrics:
     # Threshold는 확률 기준값이므로 0~1 범위만 허용
     if not 0.0 <= threshold <= 1.0:
         raise ValueError("threshold must be between 0.0 and 1.0")
+
+    # 이진 분류의 정상·불량 Label은 서로 다른 값이어야 함
+    if positive_label == negative_label:
+        raise ValueError("positive_label and negative_label must be different")
 
     # Generator, List, Series 등 다양한 입력을 1차원 NumPy Array로 통일
     labels = np.asarray(list(y_true))
@@ -98,7 +108,23 @@ def evaluate_binary_scores(
     if (scores < 0.0).any() or (scores > 1.0).any():
         raise ValueError("positive_scores must be probabilities between 0.0 and 1.0")
 
-    # 원본 Label(-1, 1 등)에서 Fail Label만 1로 변환해 지표 기준을 통일
+    # None, NaN, pd.NA는 정상 Label로 묵시적으로 처리하지 않고 데이터 오류로 차단
+    missing_labels = np.asarray(pd.isna(labels), dtype=bool)
+    if missing_labels.any():
+        raise ValueError("y_true must not contain missing labels")
+
+    # Dataset Profile에 정의된 정상·불량 Label 외 값은 성능을 왜곡하므로 즉시 차단
+    allowed_labels = (negative_label, positive_label)
+    invalid_labels = [
+        label for label in labels if not any(label == allowed_label for allowed_label in allowed_labels)
+    ]
+    if invalid_labels:
+        raise ValueError(
+            "y_true contains labels outside negative_label and positive_label: "
+            f"{invalid_labels}"
+        )
+
+    # 검증된 원본 Label에서 Fail Label만 1로 변환해 지표 기준을 통일
     y_binary = (labels == positive_label).astype(int)
     if y_binary.sum() == 0:
         raise ValueError("y_true does not contain positive_label")
