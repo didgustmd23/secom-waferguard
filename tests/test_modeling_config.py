@@ -22,6 +22,14 @@ class ModelingConfigTest(unittest.TestCase):
         self.assertEqual(MODELING_CONFIG.dataset.negative_label, -1)
         self.assertTrue(MODELING_CONFIG.dataset.input_path.is_absolute())
         self.assertEqual(MODELING_CONFIG.experiment.cv.n_splits, 5)
+        self.assertIsNotNone(MODELING_CONFIG.dataset.ingestion)
+        self.assertEqual(
+            MODELING_CONFIG.dataset.ingestion.adapter, "feature_metadata_pair"
+        )
+        self.assertEqual(len(MODELING_CONFIG.dataset.ingestion.sources), 2)
+        self.assertTrue(
+            MODELING_CONFIG.dataset.ingestion.get_source("features").path.is_absolute()
+        )
 
     # Dataset Profile에서 필수 positive Label이 빠지면 즉시 오류가 나는지 확인
     def test_dataset_profile_rejects_missing_positive_label(self) -> None:

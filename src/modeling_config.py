@@ -19,6 +19,41 @@ DEFAULT_CONFIG_PATH: Final = Path(__file__).resolve().parents[1] / "config.json"
 
 
 # ==========================================
+# 원본 데이터 source 하나의 위치와 CSV 읽기 옵션
+# - source 이름과 파일 경로를 Profile에서 선언해 파일 역할을 코드에 고정하지 않음
+# - read_csv_options는 구분자, header, encoding 등 원본 형식별 읽기 조건을 보관
+# - 여러 source를 조합하는 방식은 adapter가 선택하고, 범용 코어는 source 목록만 관리
+# ==========================================
+@dataclass(frozen=True)
+class IngestionSourceSpec:
+    name: str
+    path: Path
+    read_csv_options: dict[str, Any]
+
+
+# ==========================================
+# 데이터셋 전용 원본 파일을 canonical table로 변환하는 ingestion 설정
+# - adapter는 source 결합 규칙을 제공하고, source 개수·이름·읽기 방식은 Profile에서 관리
+# - adapter_options는 adapter에 필요한 추가 규칙만 보관해 특정 데이터셋 필드를 코어에서 제거
+# - 범용 split·모델링 코어는 canonical table 이후 단계만 담당
+# ==========================================
+@dataclass(frozen=True)
+class IngestionSpec:
+    adapter: str
+    sources: tuple[IngestionSourceSpec, ...]
+    adapter_options: dict[str, Any]
+
+    def get_source(self, name: str) -> IngestionSourceSpec:
+        """Profile에 선언된 이름으로 원본 source를 조회한다."""
+        # source 이름은 adapter_options에서 참조하므로 순서가 아닌 이름으로 조회한다.
+        for source in self.sources:
+            if source.name == name:
+                return source
+        # 잘못된 source 이름은 병합 전에 명확한 Profile 오류로 중단한다.
+        raise ValueError(f"ingestion source is not defined: {name}")
+
+
+# ==========================================
 # 데이터셋별 구조·Label·품질 규칙 Profile
 # - 데이터 경로, Label, Timestamp, feature 선택 규칙을 데이터셋별 JSON으로 관리
 # - feature_selection_mode는 prefix 또는 all_except_metadata 중 하나를 사용
@@ -37,6 +72,11 @@ class DatasetSpec:
     feature_column_prefix: str | None
     missing_ratio_threshold: float
     drop_zero_variance: bool
+    id_columns: tuple[str, ...] = ()
+    group_columns: tuple[str, ...] = ()
+    excluded_feature_columns: tuple[str, ...] = ()
+    categorical_feature_columns: tuple[str, ...] = ()
+    ingestion: IngestionSpec | None = None
 
 
 # ==========================================
@@ -129,6 +169,25 @@ def _require_value(
 
 
 # ==========================================
+# JSON 설정의 선택 문자열 목록을 tuple로 로드·검증
+# - 선언하지 않은 역할 목록은 빈 tuple로 처리해 최소 Profile도 지원
+# - 빈 값·중복·문자열 외 값을 조기에 차단해 컬럼 역할 모호성을 제거
+# ==========================================
+def _load_optional_column_names(source: dict[str, Any], key: str) -> tuple[str, ...]:
+    # Profile에 해당 역할을 선언하지 않으면 빈 목록으로 처리한다.
+    value = source.get(key, [])
+    # 컬럼 역할은 실제 DataFrame 컬럼명과 비교하므로 비어 있지 않은 문자열만 허용한다.
+    if not isinstance(value, list) or not all(
+        isinstance(column, str) and column for column in value
+    ):
+        raise ValueError(f"configuration key '{key}' must be a list of non-empty strings")
+    # 같은 역할을 두 번 선언하면 feature 제외 규칙이 모호해지므로 차단한다.
+    if len(value) != len(set(value)):
+        raise ValueError(f"configuration key '{key}' must not contain duplicates")
+    return tuple(value)
+
+
+# ==========================================
 # JSON 파일을 읽어 최상위 Object인지 검증
 # - 공통 실험 설정과 Dataset Profile에서 동일한 파일 오류 처리를 사용
 # - UTF-8 JSON만 허용해 운영체제 기본 인코딩에 영향받지 않음
@@ -186,6 +245,54 @@ def load_dataset_spec(
     if (timestamp_column is None) != (timestamp_format is None):
         raise ValueError("columns.timestamp and columns.timestamp_format must be set together")
 
+    # ID·그룹·명시적 제외 컬럼은 모델 입력에서 반드시 제외할 Dataset Profile 역할
+    raw_column_roles = raw_profile.get("column_roles", {})
+    if not isinstance(raw_column_roles, dict):
+        raise ValueError("configuration key 'column_roles' must be an object")
+    id_columns = _load_optional_column_names(raw_column_roles, "id_columns")
+    group_columns = _load_optional_column_names(raw_column_roles, "group_columns")
+    excluded_feature_columns = _load_optional_column_names(
+        raw_column_roles, "excluded_feature_columns"
+    )
+    role_columns = id_columns + group_columns + excluded_feature_columns
+    if len(role_columns) != len(set(role_columns)):
+        raise ValueError("column role lists must not contain the same column twice")
+
+    # Label·timestamp는 이미 모델 입력에서 제외되므로 역할 목록에 중복 선언하지 않음
+    reserved_columns = {label_column}
+    if timestamp_column is not None:
+        reserved_columns.add(timestamp_column)
+    duplicated_roles = [column for column in role_columns if column in reserved_columns]
+    if duplicated_roles:
+        raise ValueError(
+            "column role lists must not repeat label or timestamp columns: "
+            f"{duplicated_roles}"
+        )
+
+    # 범주형 feature는 명시적으로 선언하고, 나머지 선택 feature는 수치형으로 검증한다.
+    raw_feature_types = raw_profile.get("feature_types", {})
+    if not isinstance(raw_feature_types, dict):
+        raise ValueError("configuration key 'feature_types' must be an object")
+    categorical_feature_columns = _load_optional_column_names(
+        raw_feature_types, "categorical_columns"
+    )
+    invalid_categorical_roles = [
+        column for column in categorical_feature_columns if column in reserved_columns
+    ]
+    if invalid_categorical_roles:
+        raise ValueError(
+            "feature_types.categorical_columns must not include label or timestamp: "
+            f"{invalid_categorical_roles}"
+        )
+    overlapping_roles = [
+        column for column in categorical_feature_columns if column in role_columns
+    ]
+    if overlapping_roles:
+        raise ValueError(
+            "feature_types.categorical_columns must not include non-feature columns: "
+            f"{overlapping_roles}"
+        )
+
     # 원본 Label 값은 숫자 또는 문자열만 허용하고 bool은 제외
     label_types = (int, float, str)
     positive_label = _require_value(labels, "positive", label_types)
@@ -216,6 +323,50 @@ def load_dataset_spec(
     if not 0.0 <= missing_ratio_threshold <= 1.0:
         raise ValueError("quality_rules.missing_ratio_threshold must be between 0 and 1")
 
+    # 원본 파일 형식이 정의된 경우 source 목록과 adapter 설정을 함께 검증
+    ingestion: IngestionSpec | None = None
+    raw_ingestion = raw_profile.get("ingestion")
+    if raw_ingestion is not None:
+        if not isinstance(raw_ingestion, dict):
+            raise ValueError("configuration key 'ingestion' must be an object or null")
+
+        # adapter는 source를 canonical table로 결합하는 규칙만 식별
+        adapter = _require_value(raw_ingestion, "adapter", str)
+
+        # 각 원본 source의 이름·경로·읽기 옵션을 Profile에서 독립적으로 읽음
+        raw_sources = _require_value(raw_ingestion, "sources", list)
+        if not raw_sources:
+            raise ValueError("ingestion.sources must contain at least one source")
+        sources: list[IngestionSourceSpec] = []
+        for raw_source in raw_sources:
+            if not isinstance(raw_source, dict):
+                raise ValueError("each ingestion source must be an object")
+            source_name = _require_value(raw_source, "name", str)
+            source_path = Path(_require_value(raw_source, "path", str))
+            read_csv_options = _require_mapping(raw_source, "read_csv_options")
+            if project_root is not None and not source_path.is_absolute():
+                source_path = project_root / source_path
+            sources.append(
+                IngestionSourceSpec(
+                    name=source_name,
+                    path=source_path,
+                    read_csv_options=read_csv_options,
+                )
+            )
+        if len({source.name for source in sources}) != len(sources):
+            raise ValueError("ingestion.sources names must be unique")
+
+        # adapter_options는 source 결합 규칙처럼 adapter 전용 설정을 담는다.
+        adapter_options = raw_ingestion.get("adapter_options", {})
+        if not isinstance(adapter_options, dict):
+            raise ValueError("ingestion.adapter_options must be an object")
+
+        ingestion = IngestionSpec(
+            adapter=adapter,
+            sources=tuple(sources),
+            adapter_options=adapter_options,
+        )
+
     # 검증된 값을 변경 불가능한 DatasetSpec으로 반환
     return DatasetSpec(
         dataset_id=dataset_id,
@@ -229,6 +380,11 @@ def load_dataset_spec(
         feature_column_prefix=feature_column_prefix,
         missing_ratio_threshold=missing_ratio_threshold,
         drop_zero_variance=drop_zero_variance,
+        id_columns=id_columns,
+        group_columns=group_columns,
+        excluded_feature_columns=excluded_feature_columns,
+        categorical_feature_columns=categorical_feature_columns,
+        ingestion=ingestion,
     )
 
 
