@@ -51,8 +51,10 @@ Model freeze → Final test (once) → Model bundle
 
 #### B 결정 사항
 
-- Fail label은 `1`로 고정한다. 모델 비교에서는 AP와 Fail Recall을 핵심 지표로, Precision·F1·ROC-AUC를 보조 지표로 기록한다.
+- SECOM 실험의 기본 Fail label은 `1`로 사용한다. 평가 함수는 `positive_label` 설정값을 사용하며, 모델 비교에서는 AP와 Fail Recall을 핵심 지표로, Precision·F1·ROC-AUC를 보조 지표로 기록한다.
   - **이유:** 모든 평가 함수와 confusion matrix에서 불량 클래스를 일관되게 해석하기 위해서다. Recall은 불량을 정상으로 놓치는 False Negative 위험을, AP는 불량 비율이 낮은 데이터에서 threshold와 무관한 순위 성능을 확인한다.
+- 범용 코어는 데이터셋별 가정을 직접 갖지 않는다. 공통 실험 조건은 `config.json`, 데이터 구조·Label·품질 규칙은 `configs/datasets/<dataset_id>.json` Profile로 분리한다.
+  - **이유:** SECOM 외 tabular 데이터에도 같은 split·평가·Pipeline 코어를 적용하고, 새 데이터셋 추가 시 모델 코드가 특정 데이터셋에 종속되지 않게 하기 위해서다.
 - 후보 모델 비교는 Test를 제외한 학습 데이터에서 `RepeatedStratifiedKFold(5 folds × 5 repeats, random_state=42)`로 수행한다. 후보 비교의 threshold는 `0.50`으로 고정하며, 최종 threshold는 Day 4 OOF prediction에서만 결정한다.
   - **이유:** 약 104개의 적은 Fail 표본으로 한 번의 split에 의존하지 않기 위해 반복 계층 CV를 사용한다. 모델 비교와 운영 threshold 결정을 분리해 공정한 비교를 유지하고, Test set의 사후 최적화를 막는다.
 - Baseline은 `SimpleImputer(median) → StandardScaler → LogisticRegression` Pipeline으로 구현한다. 후보는 L1 Logistic Regression, RBF SVM, Random Forest, LightGBM으로 구성한다.

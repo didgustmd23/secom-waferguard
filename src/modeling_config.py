@@ -1,15 +1,9 @@
 # ==========================================
-# config.json 기반 모델링 실험 설정 로더
-# - 루트 config.json에서 모델링 고정값을 읽어 실험 설정 객체로 변환
-# - Python 코드에 Random Seed, Threshold, CV 횟수 등의 값을 중복하지 않음
+# Dataset Profile + config.json 기반 모델링 실험 설정 로더
+# - 범용 코어는 특정 데이터셋의 컬럼명·Label 값에 직접 의존하지 않음
+# - Dataset Profile에는 데이터 구조와 품질 규칙을, config.json에는 실험 조건을 분리
+# - SECOM은 configs/datasets/secom.json으로 제공되는 첫 번째 Dataset Profile
 # - 설정 파일 형식과 범위를 검증해 잘못된 실험 조건을 조기에 차단
-# - Test 데이터는 읽거나 참조하지 않음
-#
-# config.json 주요 항목:
-# - experiment: Label, Threshold, Missing 기준, PCA, Cross Validation 설정
-# - metrics: 핵심·보조 평가 지표
-# - feature_selection: Top-K 비교 대상
-# - models: Baseline과 후보 모델 목록
 # ==========================================
 
 from __future__ import annotations
@@ -20,15 +14,35 @@ from pathlib import Path
 from typing import Any, Final
 
 
-# src/ 기준 상위 프로젝트 루트의 config.json 경로
+# src/ 기준 상위 프로젝트 루트의 공통 실험 설정 경로
 DEFAULT_CONFIG_PATH: Final = Path(__file__).resolve().parents[1] / "config.json"
 
 
 # ==========================================
+# 데이터셋별 구조·Label·품질 규칙 Profile
+# - 데이터 경로, Label, Timestamp, feature 선택 규칙을 데이터셋별 JSON으로 관리
+# - feature_selection_mode는 prefix 또는 all_except_metadata 중 하나를 사용
+# - Profile만 추가·교체하면 코어 코드 변경 없이 다른 데이터셋을 지원
+# ==========================================
+@dataclass(frozen=True)
+class DatasetSpec:
+    dataset_id: str
+    input_path: Path
+    label_column: str
+    positive_label: int | float | str
+    negative_label: int | float | str
+    timestamp_column: str | None
+    timestamp_format: str | None
+    feature_selection_mode: str
+    feature_column_prefix: str | None
+    missing_ratio_threshold: float
+    drop_zero_variance: bool
+
+
+# ==========================================
 # 후보 모델 비교용 Repeated Stratified Cross Validation 설정
-# - 불량(Fail) 클래스 비율을 각 Fold에 유지
-# - 반복 실행으로 단일 Split 결과에 대한 의존도를 줄임
-# - random_state를 고정해 동일 조건의 실험을 재현
+# - 데이터셋의 Label 값은 DatasetSpec이 담당하고, CV 횟수만 실험 설정으로 관리
+# - 같은 random_state로 모델 비교를 재현
 # ==========================================
 @dataclass(frozen=True)
 class CrossValidationConfig:
@@ -38,27 +52,26 @@ class CrossValidationConfig:
 
 
 # ==========================================
-# 전체 모델 실험 공통 Protocol
-# - config.json의 experiment 설정을 코드에서 안전하게 사용하기 위한 객체
-# - 실제 Imputer, Scaler, Model은 단계별 Script에서 생성
-# - 값 변경은 Python 코드가 아닌 config.json에서 수행
+# 데이터셋과 독립적인 모델링 실험 Protocol
+# - Threshold, PCA, CV처럼 모델 비교에 사용하는 정책만 보관
+# - Label 값·컬럼명·결측 기준은 DatasetSpec에서 읽음
 # ==========================================
 @dataclass(frozen=True)
 class ExperimentProtocol:
-    positive_label: int
     default_threshold: float
     pca_explained_variance: float
-    missing_ratio_threshold: float
     cv: CrossValidationConfig
 
 
 # ==========================================
-# 모델링 실험 전체 설정 객체
-# - Experiment Protocol, 평가 지표, Feature Selection, 모델 목록을 함께 관리
-# - 모든 Day 2~4 Script는 같은 객체를 읽어 비교 조건을 통일
+# 전체 모델링 설정 객체
+# - dataset은 현재 선택된 Dataset Profile
+# - experiment와 model 목록은 데이터셋과 독립적인 비교 조건
+# - Day 2~4 Script는 이 객체만 받아 동일한 조건으로 실행
 # ==========================================
 @dataclass(frozen=True)
 class ModelingConfig:
+    dataset: DatasetSpec
     experiment: ExperimentProtocol
     primary_metrics: tuple[str, ...]
     secondary_metrics: tuple[str, ...]
@@ -68,75 +81,173 @@ class ModelingConfig:
 
 
 # ==========================================
-# JSON 설정에서 필수 Key를 안전하게 읽기
-# - 누락된 Key 또는 기대와 다른 자료형을 명확한 오류로 변환
-# - 이후 설정 값 검증 전에 잘못된 JSON 구조를 차단
+# JSON 설정에서 필수 Object를 안전하게 읽기
+# - 누락된 Key와 Object가 아닌 값을 명확한 오류로 변환
+# - 프로젝트 설정과 Dataset Profile에서 공통으로 사용
 # ==========================================
 def _require_mapping(source: dict[str, Any], key: str) -> dict[str, Any]:
-    # 지정한 Key가 존재하는지 확인
+    # 지정한 Key가 존재하는지 먼저 확인
     if key not in source:
-        raise ValueError(f"config.json is missing required key: {key}")
+        raise ValueError(f"configuration is missing required key: {key}")
 
-    # JSON Object가 아닌 값은 하위 설정을 가질 수 없으므로 거부
+    # 하위 설정은 JSON Object여야 하므로 List·문자열·숫자는 차단
     value = source[key]
     if not isinstance(value, dict):
-        raise ValueError(f"config.json key '{key}' must be an object")
+        raise ValueError(f"configuration key '{key}' must be an object")
 
     return value
 
 
 # ==========================================
-# JSON 설정에서 필수 값을 안전하게 읽기
-# - Scalar와 List 모두 지정 자료형인지 확인
-# - Python의 bool은 int를 상속하므로 정수 설정에서는 별도 제외
+# JSON 설정에서 필수 Scalar·List 값을 안전하게 읽기
+# - Python의 bool은 int의 하위 타입이므로 정수 설정에서는 별도 차단
+# - 타입 오류를 설정 파일 위치와 분리해 읽기 쉬운 오류로 제공
 # ==========================================
 def _require_value(
     source: dict[str, Any], key: str, expected_type: type | tuple[type, ...]
 ) -> Any:
     # 지정한 Key가 존재하는지 확인
     if key not in source:
-        raise ValueError(f"config.json is missing required key: {key}")
+        raise ValueError(f"configuration is missing required key: {key}")
 
     value = source[key]
 
-    # bool은 CV 횟수, random seed, 비율 설정에 숫자 값으로 허용하지 않음
+    # bool은 random seed·fold 수처럼 정수를 기대하는 항목에 허용하지 않음
     integer_allowed = expected_type is int or (
         isinstance(expected_type, tuple) and int in expected_type
     )
     if integer_allowed and isinstance(value, bool):
-        raise ValueError(f"config.json key '{key}' must be an integer")
+        raise ValueError(f"configuration key '{key}' must be an integer")
 
-    # 설정값의 자료형이 기대한 JSON 자료형과 같은지 확인
+    # 설정값의 실제 타입이 기대한 JSON 타입과 같은지 확인
     if not isinstance(value, expected_type):
         expected_types = expected_type if isinstance(expected_type, tuple) else (expected_type,)
         expected_name = " or ".join(item.__name__ for item in expected_types)
-        raise ValueError(f"config.json key '{key}' must be {expected_name}")
+        raise ValueError(f"configuration key '{key}' must be {expected_name}")
 
     return value
 
 
 # ==========================================
-# config.json을 ModelingConfig 객체로 로드 및 검증
-# - 파일 경로를 지정하면 테스트·다른 데이터셋 설정에도 재사용 가능
-# - Cross Validation, Threshold, PCA, Top-K의 허용 범위를 확인
-# - 검증이 끝난 설정만 불변 Dataclass 객체로 반환
+# JSON 파일을 읽어 최상위 Object인지 검증
+# - 공통 실험 설정과 Dataset Profile에서 동일한 파일 오류 처리를 사용
+# - UTF-8 JSON만 허용해 운영체제 기본 인코딩에 영향받지 않음
 # ==========================================
-def load_modeling_config(config_path: Path | str = DEFAULT_CONFIG_PATH) -> ModelingConfig:
-    # Path 또는 문자열 경로를 일관된 Path 객체로 변환
-    path = Path(config_path)
-
-    # UTF-8 JSON 파일을 읽고 JSON 문법 오류를 명확히 전달
+def _load_json_object(path: Path) -> dict[str, Any]:
+    # UTF-8 JSON 파일을 읽고 문법 오류를 명확하게 전달
     try:
         with path.open(encoding="utf-8") as config_file:
             raw_config = json.load(config_file)
     except FileNotFoundError as error:
-        raise FileNotFoundError(f"config.json not found: {path}") from error
+        raise FileNotFoundError(f"configuration file not found: {path}") from error
     except json.JSONDecodeError as error:
-        raise ValueError(f"config.json is not valid JSON: {path}") from error
+        raise ValueError(f"configuration file is not valid JSON: {path}") from error
 
-    # 최상위 JSON 구조가 Object인지 확인
+    # 최상위 구조는 이름 기반 설정을 위한 JSON Object여야 함
     if not isinstance(raw_config, dict):
-        raise ValueError("config.json root must be an object")
+        raise ValueError(f"configuration root must be an object: {path}")
+
+    return raw_config
+
+
+# ==========================================
+# Dataset Profile을 DatasetSpec 객체로 로드·검증
+# - 데이터셋 전용 가정을 코어 코드가 아닌 Profile 파일에 격리
+# - 다른 데이터셋은 같은 형식의 JSON Profile만 추가하면 됨
+# ==========================================
+def load_dataset_spec(
+    profile_path: Path | str, *, project_root: Path | None = None
+) -> DatasetSpec:
+    # 문자열 또는 Path 입력을 일관된 경로 객체로 변환
+    path = Path(profile_path)
+    raw_profile = _load_json_object(path)
+
+    # Dataset Profile의 구조 영역을 분리
+    columns = _require_mapping(raw_profile, "columns")
+    labels = _require_mapping(raw_profile, "labels")
+    feature_columns = _require_mapping(raw_profile, "feature_columns")
+    quality_rules = _require_mapping(raw_profile, "quality_rules")
+
+    # 데이터셋 식별자와 Profile에 기록된 입력 경로를 읽음
+    dataset_id = _require_value(raw_profile, "dataset_id", str)
+    input_path = Path(_require_value(raw_profile, "input_path", str))
+    # config.json이 있는 디렉터리를 기준으로 입력 경로를 절대 경로로 변환
+    if project_root is not None and not input_path.is_absolute():
+        input_path = project_root / input_path
+
+    # Label과 Timestamp 컬럼 정의를 읽음
+    label_column = _require_value(columns, "label", str)
+    timestamp_column = columns.get("timestamp")
+    timestamp_format = columns.get("timestamp_format")
+    if timestamp_column is not None and not isinstance(timestamp_column, str):
+        raise ValueError("configuration key 'columns.timestamp' must be string or null")
+    if timestamp_format is not None and not isinstance(timestamp_format, str):
+        raise ValueError("configuration key 'columns.timestamp_format' must be string or null")
+    if (timestamp_column is None) != (timestamp_format is None):
+        raise ValueError("columns.timestamp and columns.timestamp_format must be set together")
+
+    # 원본 Label 값은 숫자 또는 문자열만 허용하고 bool은 제외
+    label_types = (int, float, str)
+    positive_label = _require_value(labels, "positive", label_types)
+    negative_label = _require_value(labels, "negative", label_types)
+    if isinstance(positive_label, bool) or isinstance(negative_label, bool):
+        raise ValueError("labels.positive and labels.negative must not be bool")
+    if positive_label == negative_label:
+        raise ValueError("labels.positive and labels.negative must be different")
+
+    # Feature 선택 방법을 읽고 prefix 방식일 때만 prefix 값을 요구
+    feature_selection_mode = _require_value(feature_columns, "selection", str)
+    feature_column_prefix = feature_columns.get("prefix")
+    if feature_selection_mode not in {"prefix", "all_except_metadata"}:
+        raise ValueError(
+            "feature_columns.selection must be 'prefix' or 'all_except_metadata'"
+        )
+    if feature_selection_mode == "prefix":
+        if not isinstance(feature_column_prefix, str) or not feature_column_prefix:
+            raise ValueError("feature_columns.prefix must be a non-empty string for prefix mode")
+    elif feature_column_prefix is not None:
+        raise ValueError("feature_columns.prefix must be null for all_except_metadata mode")
+
+    # 결측률·분산 규칙은 Dataset Profile별 데이터 품질 정책으로 관리
+    missing_ratio_threshold = float(
+        _require_value(quality_rules, "missing_ratio_threshold", (int, float))
+    )
+    drop_zero_variance = _require_value(quality_rules, "drop_zero_variance", bool)
+    if not 0.0 <= missing_ratio_threshold <= 1.0:
+        raise ValueError("quality_rules.missing_ratio_threshold must be between 0 and 1")
+
+    # 검증된 값을 변경 불가능한 DatasetSpec으로 반환
+    return DatasetSpec(
+        dataset_id=dataset_id,
+        input_path=input_path,
+        label_column=label_column,
+        positive_label=positive_label,
+        negative_label=negative_label,
+        timestamp_column=timestamp_column,
+        timestamp_format=timestamp_format,
+        feature_selection_mode=feature_selection_mode,
+        feature_column_prefix=feature_column_prefix,
+        missing_ratio_threshold=missing_ratio_threshold,
+        drop_zero_variance=drop_zero_variance,
+    )
+
+
+# ==========================================
+# config.json과 선택된 Dataset Profile을 ModelingConfig로 로드·검증
+# - config.json의 dataset_profile 경로는 config.json 위치 기준으로 해석
+# - 실험 설정과 데이터셋 설정을 함께 반환해 호출부의 하드코딩을 제거
+# ==========================================
+def load_modeling_config(config_path: Path | str = DEFAULT_CONFIG_PATH) -> ModelingConfig:
+    # 문자열 또는 Path 입력을 일관된 경로 객체로 변환
+    path = Path(config_path)
+    raw_config = _load_json_object(path)
+
+    # Dataset Profile 경로를 공통 실험 설정 위치를 기준으로 해석
+    profile_reference = _require_value(raw_config, "dataset_profile", str)
+    profile_path = Path(profile_reference)
+    if not profile_path.is_absolute():
+        profile_path = path.parent / profile_path
+    dataset = load_dataset_spec(profile_path, project_root=path.parent)
 
     # 실험·평가·특징 선택·모델 설정 영역을 분리
     experiment = _require_mapping(raw_config, "experiment")
@@ -145,20 +256,16 @@ def load_modeling_config(config_path: Path | str = DEFAULT_CONFIG_PATH) -> Model
     models = _require_mapping(raw_config, "models")
     cv = _require_mapping(experiment, "cross_validation")
 
-    # 숫자 기반 실험 설정을 읽음
+    # 데이터셋과 독립적인 수치 기반 실험 설정을 읽음
     random_state = _require_value(experiment, "random_state", int)
-    positive_label = _require_value(experiment, "positive_label", int)
     default_threshold = float(_require_value(experiment, "default_threshold", (int, float)))
-    missing_ratio_threshold = float(
-        _require_value(experiment, "missing_ratio_threshold", (int, float))
-    )
     pca_explained_variance = float(
         _require_value(experiment, "pca_explained_variance", (int, float))
     )
     n_splits = _require_value(cv, "n_splits", int)
     n_repeats = _require_value(cv, "n_repeats", int)
 
-    # List 기반 모델링 설정을 Tuple로 변환해 실행 중 수정 방지
+    # List 기반 설정은 실행 중 수정되지 않도록 Tuple로 변환
     primary_metrics = tuple(_require_value(metrics, "primary", list))
     secondary_metrics = tuple(_require_value(metrics, "secondary", list))
     top_k_feature_counts = tuple(
@@ -167,21 +274,21 @@ def load_modeling_config(config_path: Path | str = DEFAULT_CONFIG_PATH) -> Model
     baseline_model = _require_value(models, "baseline", str)
     candidate_models = tuple(_require_value(models, "candidates", list))
 
-    # 확률·비율·교차 검증 횟수의 논리적 범위를 검증
+    # 실험 수치의 허용 범위를 검증
     if not 0.0 < default_threshold < 1.0:
         raise ValueError("experiment.default_threshold must be between 0 and 1")
-    if not 0.0 <= missing_ratio_threshold <= 1.0:
-        raise ValueError("experiment.missing_ratio_threshold must be between 0 and 1")
     if not 0.0 < pca_explained_variance <= 1.0:
         raise ValueError("experiment.pca_explained_variance must be in (0, 1]")
     if n_splits < 2 or n_repeats < 1:
         raise ValueError("cross_validation requires n_splits >= 2 and n_repeats >= 1")
 
-    # 지표·모델 이름·Top-K 값은 비어 있지 않고 기대한 자료형인지 확인
+    # 문자열 목록과 Top-K 목록의 내용까지 검증
     if not primary_metrics or not all(isinstance(metric, str) for metric in primary_metrics):
         raise ValueError("metrics.primary must contain at least one metric name")
     if not secondary_metrics or not all(isinstance(metric, str) for metric in secondary_metrics):
         raise ValueError("metrics.secondary must contain metric names")
+    if not baseline_model:
+        raise ValueError("models.baseline must not be empty")
     if not candidate_models or not all(isinstance(model, str) for model in candidate_models):
         raise ValueError("models.candidates must contain at least one model name")
     if not top_k_feature_counts or not all(
@@ -190,13 +297,12 @@ def load_modeling_config(config_path: Path | str = DEFAULT_CONFIG_PATH) -> Model
     ):
         raise ValueError("feature_selection.top_k_feature_counts must contain positive integers")
 
-    # 검증된 값을 Day 2~4에서 공통으로 사용할 불변 설정 객체로 반환
+    # Dataset Profile과 실험 설정을 하나의 범용 모델링 설정 객체로 반환
     return ModelingConfig(
+        dataset=dataset,
         experiment=ExperimentProtocol(
-            positive_label=positive_label,
             default_threshold=default_threshold,
             pca_explained_variance=pca_explained_variance,
-            missing_ratio_threshold=missing_ratio_threshold,
             cv=CrossValidationConfig(
                 n_splits=n_splits,
                 n_repeats=n_repeats,
@@ -211,5 +317,5 @@ def load_modeling_config(config_path: Path | str = DEFAULT_CONFIG_PATH) -> Model
     )
 
 
-# config.json을 한 번 로드해 다른 Script에서 공통 설정으로 import
+# config.json과 활성 Dataset Profile을 한 번 로드해 다른 Script에서 공통으로 import
 MODELING_CONFIG: Final = load_modeling_config()

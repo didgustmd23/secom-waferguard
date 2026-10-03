@@ -1,0 +1,21 @@
+{
+  "dataset_id": "secom",
+  "input_path": "data/processed/secom_merged.csv",
+  "columns": {
+    "label": "label",
+    "timestamp": "timestamp",
+    "timestamp_format": "%d/%m/%Y %H:%M:%S"
+  },
+  "labels": {
+    "negative": -1,
+    "positive": 1
+  },
+  "feature_columns": {
+    "selection": "prefix",
+    "prefix": "sensor_"
+  },
+  "quality_rules": {
+    "missing_ratio_threshold": 0.5,
+    "drop_zero_variance": true
+  }
+}
