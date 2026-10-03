@@ -11,7 +11,11 @@ from collections.abc import Iterable
 
 import pandas as pd
 
-from src.modeling_config import DatasetSpec
+# `python -m src...` 실행과 `python src/<script>.py` 직접 실행을 모두 지원한다.
+try:
+    from src.modeling_config import DatasetSpec
+except ModuleNotFoundError:
+    from modeling_config import DatasetSpec
 
 
 # ==========================================

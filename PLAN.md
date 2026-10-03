@@ -40,8 +40,14 @@ Model freeze → Final test (once) → Model bundle
 - [x] Sensor + Label + Timestamp 병합
 - [x] 행·열 수, 클래스 분포, 중복, Timestamp 확인
 - [x] 센서별 결측률 산출
-- [x] 결측률 50% 초과 및 zero-variance 센서 제거 기준 확정
-- [x] 제거 전후 센서 수와 사유를 `logs/dataset_log.csv`에 기록
+- [x] 결측률 50% 초과 및 zero-variance 센서 EDA 후보 기준 확정
+- [x] 제거 후보·EDA 기준 잔여 센서 수와 사유를 `logs/dataset_log.csv`에 기록
+
+#### Day 1 데이터 처리 원칙 및 변경 이유
+
+- 원본 sensor·metadata 병합은 Dataset Profile의 `ingestion` 정의를 사용해 canonical `secom_merged.csv`를 생성한다. 원본 경로, 구분자, label/timestamp 열 순서를 코드에 고정하지 않아 다른 공장 데이터도 Profile과 adapter만 추가해 같은 코어를 재사용할 수 있다.
+- `step2_data_check.py`의 결측률 50% 초과·상수 센서 결과는 전체 데이터 EDA용 후보와 근거를 기록하는 용도다. 전역 `secom_cleaned.csv`를 만들거나 그 결과를 모델 입력에 바로 적용하지 않는다. 실제 제거·대치·선택은 Train 또는 CV 학습 fold 안에서 fit해야 validation/test 정보가 학습에 섞이지 않는다.
+- `secom_merged.csv`와 `dataset_log.csv`는 원본 파일과 Profile로 재생성하는 결과물이다. 저장소에는 코드·설정·문서만 유지하고, 결과 CSV는 `.gitignore`로 제외한다.
 
 ### B — 양현승 (모델링·평가)
 

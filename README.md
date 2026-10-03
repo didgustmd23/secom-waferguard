@@ -13,8 +13,8 @@
 | 범용 설정 코어 | 완료 | `config.json`과 Dataset Profile을 분리해 로드·검증 |
 | 데이터 구조 검증 | 완료 | Profile 기준 label·metadata·feature 컬럼 검증 |
 | 공통 평가 | 완료 | Profile label 기반 Recall, AP, Precision, F1, ROC-AUC 계산 |
-| 자동 테스트 | 완료 | 설정·schema·평가 함수 10개 테스트 |
-| 데이터 병합·품질 점검 | 예정 | `step1_merge_data.py`, `step2_data_check.py` |
+| 자동 테스트 | 완료 | 설정·schema·평가·병합·품질 점검 13개 테스트 |
+| 데이터 병합·품질 점검 | 완료 | Profile 기반 canonical 병합과 재생성 가능한 품질 로그 |
 | split·baseline·후속 모델링 | 예정 | Day 2~5 계획에 따라 구현 |
 
 ## 프로젝트 목표
@@ -115,7 +115,7 @@ pip install -r requirements.txt
 범용 코어와 데이터셋별 가정을 분리합니다.
 
 - `config.json`: 난수 시드, 후보 모델 비교용 `default_threshold`, CV처럼 데이터셋과 독립적인 실험 조건
-- `configs/datasets/secom.json`: SECOM의 입력 경로, label 값, timestamp 형식, feature 컬럼 규칙, 데이터 품질 기준
+- `configs/datasets/secom.json`: SECOM의 원본 수집 형식, 입력 경로, label 값, timestamp 형식, feature 컬럼 규칙, 데이터 품질 기준
 
 `src/modeling_config.py`는 두 설정을 함께 읽어 `ModelingConfig`와 `DatasetSpec`으로 검증합니다. `src/dataset_schema.py`는 Profile 기준으로 label·metadata·feature 컬럼을 검증합니다. 따라서 새 데이터셋에는 코어 코드를 고치지 않고 같은 형식의 Dataset Profile을 추가합니다.
 
@@ -127,6 +127,8 @@ pip install -r requirements.txt
 
 `prefix` 방식은 지정한 접두어를 가진 컬럼만 feature로 사용합니다. `all_except_metadata` 방식은 label·timestamp를 제외한 모든 컬럼을 feature로 사용합니다. Profile 검증에 실패하면 split·모델링 전에 오류가 발생합니다.
 
+원본 파일을 병합해야 하는 데이터셋은 Profile의 `ingestion`에 adapter 이름, 원본 경로, 구분자, metadata 컬럼 순서를 정의합니다. 같은 수집 형식이면 Profile만 추가하고, 형식이 다를 때에만 해당 adapter를 추가합니다.
+
 ### 자동 테스트
 
 현재 구현된 범용 코어는 아래 명령으로 검증합니다.
@@ -135,13 +137,22 @@ pip install -r requirements.txt
 python -m unittest discover -s tests -v
 ```
 
-UCI의 원본 데이터 CSV는 저장소에 포함하지 않습니다. [UCI SECOM Data Set](https://archive.ics.uci.edu/dataset/179/secom)에서 `secom.data`, `secom_labels.data`를 받아 `data/raw/`에 저장합니다. 원본 파일은 수정하지 않고, 이후 병합·품질 점검 Script로 재현 가능한 산출물을 생성합니다.
+UCI의 원본 데이터 CSV는 저장소에 포함하지 않습니다. [UCI SECOM Data Set](https://archive.ics.uci.edu/dataset/179/secom)에서 `secom.data`, `secom_labels.data`를 받아 `data/raw/`에 저장합니다. 원본 파일은 수정하지 않고, 아래 Script로 재현 가능한 산출물을 생성합니다.
 
-현재 실행 가능한 코어 검증은 자동 테스트입니다. 아래 데이터 처리·모델링 명령은 Day 2~5 구현 후 사용할 예정입니다.
+### Day 1 데이터 준비
 
-```bash
+```powershell
 python src/step1_merge_data.py
 python src/step2_data_check.py
+```
+
+`step1_merge_data.py`는 Profile의 `ingestion` 정의로 원본 sensor·metadata 파일을 병합하여 canonical 입력(`data/processed/secom_merged.csv`)을 생성합니다. 따라서 원본 경로나 label/timestamp 열 순서를 코드에 고정하지 않아 다른 데이터셋 Profile에도 같은 처리 흐름을 적용할 수 있습니다.
+
+`step2_data_check.py`는 결측률·상수 feature·timestamp·label 분포를 `logs/dataset_log.csv`에 기록합니다. 이 결과는 전체 데이터의 EDA 후보 정보일 뿐이며, 이를 사용해 `secom_cleaned.csv`를 만들거나 모델 feature를 전역에서 제거하지 않습니다. 실제 결측 처리와 feature 선택은 Train/CV 학습 fold 안에서만 fit하여 데이터 누수를 방지합니다. 두 CSV 산출물은 원본과 Profile만 있으면 재생성 가능하므로 Git에서 추적하지 않습니다.
+
+아래 split·모델링 명령은 Day 2~5 구현 후 사용할 예정입니다.
+
+```bash
 python src/step3_split.py
 python src/step4_baseline.py
 python src/step5_feature_selection.py
@@ -162,12 +173,14 @@ secom-waferguard/
 │       └── secom.json       # SECOM Dataset Profile
 ├── data/
 │   ├── raw/                 # 수정하지 않는 원본 데이터
-│   ├── processed/           # 병합·정제 데이터
+│   ├── processed/           # 병합 canonical 데이터
 │   └── splits/              # 데이터 분할 정보
 ├── src/
 │   ├── modeling_config.py   # 공통 실험 설정·Dataset Profile 로드·검증
 │   ├── dataset_schema.py    # Profile 기반 feature·label 구조 검증
 │   ├── modeling_metrics.py  # Dataset Profile label 기반 공통 평가 함수
+│   ├── step1_merge_data.py  # Profile ingestion 기반 원본 병합
+│   ├── step2_data_check.py  # EDA용 품질 로그 생성
 │   └── ...                  # 전처리, 학습, 평가, 추론 코드
 ├── tests/                   # 설정·schema·평가 함수 자동 테스트
 ├── logs/                    # 데이터·실험 결과 CSV

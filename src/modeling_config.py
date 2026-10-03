@@ -19,6 +19,21 @@ DEFAULT_CONFIG_PATH: Final = Path(__file__).resolve().parents[1] / "config.json"
 
 
 # ==========================================
+# 데이터셋 전용 원본 파일을 canonical table로 변환하는 ingestion 설정
+# - adapter는 원본 파일 형식이 다른 데이터셋별 처리기를 구분
+# - sensor·metadata 경로와 metadata 컬럼 순서는 Profile에서 관리
+# - 범용 split·모델링 코어는 canonical table 이후 단계만 담당
+# ==========================================
+@dataclass(frozen=True)
+class IngestionSpec:
+    adapter: str
+    sensor_path: Path
+    metadata_path: Path
+    separator: str
+    metadata_columns: tuple[str, ...]
+
+
+# ==========================================
 # 데이터셋별 구조·Label·품질 규칙 Profile
 # - 데이터 경로, Label, Timestamp, feature 선택 규칙을 데이터셋별 JSON으로 관리
 # - feature_selection_mode는 prefix 또는 all_except_metadata 중 하나를 사용
@@ -37,6 +52,7 @@ class DatasetSpec:
     feature_column_prefix: str | None
     missing_ratio_threshold: float
     drop_zero_variance: bool
+    ingestion: IngestionSpec | None = None
 
 
 # ==========================================
@@ -216,6 +232,41 @@ def load_dataset_spec(
     if not 0.0 <= missing_ratio_threshold <= 1.0:
         raise ValueError("quality_rules.missing_ratio_threshold must be between 0 and 1")
 
+    # 원본 파일 형식이 정의된 경우 ingestion 설정을 함께 검증
+    ingestion: IngestionSpec | None = None
+    raw_ingestion = raw_profile.get("ingestion")
+    if raw_ingestion is not None:
+        if not isinstance(raw_ingestion, dict):
+            raise ValueError("configuration key 'ingestion' must be an object or null")
+
+        # adapter와 원본 파일 경로를 읽고 config.json 기준 절대 경로로 변환
+        adapter = _require_value(raw_ingestion, "adapter", str)
+        sensor_path = Path(_require_value(raw_ingestion, "sensor_path", str))
+        metadata_path = Path(_require_value(raw_ingestion, "metadata_path", str))
+        separator = _require_value(raw_ingestion, "separator", str)
+        if project_root is not None:
+            if not sensor_path.is_absolute():
+                sensor_path = project_root / sensor_path
+            if not metadata_path.is_absolute():
+                metadata_path = project_root / metadata_path
+
+        # metadata 파일의 컬럼 순서는 병합 결과의 metadata 순서를 결정
+        raw_metadata_columns = _require_value(raw_ingestion, "metadata_columns", list)
+        if not raw_metadata_columns or not all(
+            isinstance(column, str) and column for column in raw_metadata_columns
+        ):
+            raise ValueError("ingestion.metadata_columns must contain non-empty strings")
+        if len(raw_metadata_columns) != len(set(raw_metadata_columns)):
+            raise ValueError("ingestion.metadata_columns must not contain duplicates")
+
+        ingestion = IngestionSpec(
+            adapter=adapter,
+            sensor_path=sensor_path,
+            metadata_path=metadata_path,
+            separator=separator,
+            metadata_columns=tuple(raw_metadata_columns),
+        )
+
     # 검증된 값을 변경 불가능한 DatasetSpec으로 반환
     return DatasetSpec(
         dataset_id=dataset_id,
@@ -229,6 +280,7 @@ def load_dataset_spec(
         feature_column_prefix=feature_column_prefix,
         missing_ratio_threshold=missing_ratio_threshold,
         drop_zero_variance=drop_zero_variance,
+        ingestion=ingestion,
     )
 
 

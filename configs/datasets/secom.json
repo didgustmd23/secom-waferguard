@@ -17,5 +17,15 @@
   "quality_rules": {
     "missing_ratio_threshold": 0.5,
     "drop_zero_variance": true
+  },
+  "ingestion": {
+    "adapter": "secom_whitespace_pair",
+    "sensor_path": "data/raw/secom.data",
+    "metadata_path": "data/raw/secom_labels.data",
+    "separator": "\\s+",
+    "metadata_columns": [
+      "label",
+      "timestamp"
+    ]
   }
 }
