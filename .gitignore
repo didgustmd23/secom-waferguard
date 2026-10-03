@@ -29,5 +29,6 @@ data/raw/
 # Data
 *.data
 *.csv
+!logs/dataset_log.csv
 *.xls
 
