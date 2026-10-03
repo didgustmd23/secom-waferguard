@@ -252,11 +252,13 @@ def run_quality_check(
     print(f"입력 경로: {dataset.input_path}")
     print(f"로그 저장 경로: {destination}")
     print(f"데이터 크기: {dataframe.shape}")
+    # 전역 EDA 후보의 개수만 로그 요약 행에서 읽어 콘솔에 표시한다.
     high_missing_count = quality_log.loc[
         (quality_log["category"] == "feature_summary")
         & (quality_log["item"] == "high_missing_candidate_count"),
         "value",
     ].iloc[0]
+    # feature 이름 목록은 반환하지 않아 이후 모델 선택에 재사용되지 않게 한다.
     constant_count = quality_log.loc[
         (quality_log["category"] == "feature_summary")
         & (quality_log["item"] == "constant_candidate_count"),

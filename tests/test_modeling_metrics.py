@@ -22,6 +22,7 @@ class ModelingMetricsTest(unittest.TestCase):
             [0.1, 0.9, 0.7, 0.3],
             positive_label=1,
             negative_label=-1,
+            # 평가 함수가 자체 기본값 대신 config.json의 실험 기준을 사용하도록 전달한다.
             threshold=MODELING_CONFIG.experiment.default_threshold,
         )
 

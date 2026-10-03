@@ -45,9 +45,11 @@ class IngestionSpec:
 
     def get_source(self, name: str) -> IngestionSourceSpec:
         """Profile에 선언된 이름으로 원본 source를 조회한다."""
+        # source 이름은 adapter_options에서 참조하므로 순서가 아닌 이름으로 조회한다.
         for source in self.sources:
             if source.name == name:
                 return source
+        # 잘못된 source 이름은 병합 전에 명확한 Profile 오류로 중단한다.
         raise ValueError(f"ingestion source is not defined: {name}")
 
 
@@ -172,11 +174,14 @@ def _require_value(
 # - 빈 값·중복·문자열 외 값을 조기에 차단해 컬럼 역할 모호성을 제거
 # ==========================================
 def _load_optional_column_names(source: dict[str, Any], key: str) -> tuple[str, ...]:
+    # Profile에 해당 역할을 선언하지 않으면 빈 목록으로 처리한다.
     value = source.get(key, [])
+    # 컬럼 역할은 실제 DataFrame 컬럼명과 비교하므로 비어 있지 않은 문자열만 허용한다.
     if not isinstance(value, list) or not all(
         isinstance(column, str) and column for column in value
     ):
         raise ValueError(f"configuration key '{key}' must be a list of non-empty strings")
+    # 같은 역할을 두 번 선언하면 feature 제외 규칙이 모호해지므로 차단한다.
     if len(value) != len(set(value)):
         raise ValueError(f"configuration key '{key}' must not contain duplicates")
     return tuple(value)
