@@ -24,6 +24,29 @@ print("\n데이터 정보:")
 df.info()
 
 
+# 데이터 기본 품질 확인
+
+# 클래스 분포 확인
+print("\n클래스 분포:")
+print(df["label"].value_counts().sort_index())
+
+
+# 중복 행 확인
+duplicate_count = df.duplicated().sum()
+
+print("\n중복 행 개수:", duplicate_count)
+
+
+# Timestamp 확인
+print("\nTimestamp 확인:")
+print("Timestamp 데이터 타입:", df["timestamp"].dtype)
+print("Timestamp 결측치:", df["timestamp"].isna().sum())
+print("Timestamp 중복값:", df["timestamp"].duplicated().sum())
+print("Timestamp 앞부분:")
+print(df["timestamp"].head())
+print("Timestamp 뒷부분:")
+print(df["timestamp"].tail())
+
 # --------------------------------------------------
 # 2. 센서 컬럼 찾기
 # --------------------------------------------------

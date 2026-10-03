@@ -36,12 +36,12 @@ Model freeze → Final test (once) → Model bundle
 
 ### A — 이종수 (데이터·분석)
 
-- [ ] Sensor 데이터와 Label/Timestamp 데이터를 `data/raw/`에 저장
-- [ ] Sensor + Label + Timestamp 병합
-- [ ] 행·열 수, 클래스 분포, 중복, Timestamp 확인
-- [ ] 센서별 결측률 산출
-- [ ] 결측률 50% 초과 및 zero-variance 센서 제거 기준 확정
-- [ ] 제거 전후 센서 수와 사유를 `logs/dataset_log.csv`에 기록
+- [x] Sensor 데이터와 Label/Timestamp 데이터를 `data/raw/`에 저장
+- [x] Sensor + Label + Timestamp 병합
+- [x] 행·열 수, 클래스 분포, 중복, Timestamp 확인
+- [x] 센서별 결측률 산출
+- [x] 결측률 50% 초과 및 zero-variance 센서 제거 기준 확정
+- [x] 제거 전후 센서 수와 사유를 `logs/dataset_log.csv`에 기록
 
 ### B — 양현승 (모델링·평가)
 
