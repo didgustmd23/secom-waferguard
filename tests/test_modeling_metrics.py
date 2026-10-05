@@ -46,7 +46,7 @@ class ModelingMetricsTest(unittest.TestCase):
 
     # 허용하지 않은 Label은 정상으로 묵시 처리하지 않고 오류를 발생시키는지 확인
     def test_rejects_unsupported_label(self) -> None:
-        with self.assertRaisesRegex(ValueError, "outside negative_label"):
+        with self.assertRaisesRegex(ValueError, "이외의 label"):
             evaluate_binary_scores(
                 [-1, 1, 999],
                 [0.1, 0.9, 0.2],
@@ -59,7 +59,7 @@ class ModelingMetricsTest(unittest.TestCase):
     def test_rejects_missing_labels(self) -> None:
         for missing_label in (None, float("nan"), pd.NA):
             with self.subTest(missing_label=missing_label):
-                with self.assertRaisesRegex(ValueError, "missing labels"):
+                with self.assertRaisesRegex(ValueError, "결측 label"):
                     evaluate_binary_scores(
                         [-1, 1, missing_label],
                         [0.1, 0.9, 0.2],

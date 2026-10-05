@@ -32,7 +32,7 @@ class ModelingConfigTest(unittest.TestCase):
         )
 
     # Dataset Profile에서 필수 positive Label이 빠지면 즉시 오류가 나는지 확인
-    def test_dataset_profile_rejects_missing_positive_label(self) -> None:
+    def test_profile_rejects_missing_positive_label(self) -> None:
         profile_path = Path("configs/datasets/secom.json")
         profile = json.loads(profile_path.read_text(encoding="utf-8"))
         del profile["labels"]["positive"]
@@ -44,7 +44,7 @@ class ModelingConfigTest(unittest.TestCase):
                 json.dumps(profile), encoding="utf-8"
             )
 
-            with self.assertRaisesRegex(ValueError, "required key: positive"):
+            with self.assertRaisesRegex(ValueError, "필수 key가 없습니다: positive"):
                 load_dataset_spec(invalid_profile_path)
 
     # 결측률 기준이 0~1 범위를 벗어나면 데이터 품질 정책으로 사용하지 못하게 차단

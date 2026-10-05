@@ -30,3 +30,7 @@ data/raw/
 *.data
 *.csv
 *.xls
+
+# 재생성 가능한 split 생성 계약 (원본·설정으로 다시 생성)
+/data/splits/**/manifest.json
+

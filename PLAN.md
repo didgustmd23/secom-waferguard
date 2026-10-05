@@ -77,11 +77,13 @@ Model freeze → Final test (once) → Model bundle
   **공동 결정된 데이터 분할 기준**
 
   1. **입력 데이터:** 분할과 모델링에는 `data/processed/secom_merged.csv`를 사용한다. `secom_cleaned.csv`는 전체 데이터를 기준으로 만든 EDA·점검용 산출물이므로 모델 입력으로 사용하지 않는다.
-  2. **Random split:** `Train/Validation/Test = 70/15/15`로 분할하고, `random_state=42`와 label 계층화(stratify)를 적용한다. 각 split의 원본 행 인덱스를 저장해 재현성과 중복 여부를 확인한다.
-  3. **Time-based split:** `timestamp`를 `%d/%m/%Y %H:%M:%S` 형식으로 파싱한 뒤 시간 오름차순으로 정렬한다. 과거 70%를 Train, 중간 15%를 Validation, 최근 15%를 Test로 사용하며 shuffle·stratify는 적용하지 않는다. 같은 timestamp를 가진 행은 경계에서 가능한 한 같은 split에 유지한다.
-  4. **Leakage 방지:** Train·Validation·Test에 같은 원본 행이 포함되지 않도록 검증한다. `label`, `timestamp`, Profile에 선언한 ID·그룹·제외 컬럼은 모델 입력 특징에서 제외한다. 결측치 대치, scaling, PCA, 특징 선택, 모델 학습은 Train에서만 fit하고 Validation·Test에는 transform/predict만 수행한다.
+  2. **Random 평가의 범위:** 전체 데이터에서 별도로 만든 기존 Random split은 탐색 실험으로 보존한다. 새 시간 평가에서는 먼저 Time Train·Validation·Test를 분리하고, 후보 비교·특징 선택·OOF는 같은 Time Train 내부에서만 수행한다. 내부 CV는 `random_state=42`와 label 계층화를 적용하며, 그룹이 선언된 데이터는 반복 Stratified Group K-Fold로 같은 그룹의 fold 간 누수를 방지한다.
+  3. **Time-based split:** timestamp를 Dataset Profile의 형식으로 파싱한 뒤 시간 오름차순으로 정렬한다. 과거 70%를 Train, 중간 15%를 Validation, 최근 15%를 Test로 사용하는 것을 목표로 하며 shuffle·stratify는 적용하지 않는다. 같은 timestamp·선언된 그룹·복합 ID는 경계를 넘겨 분리하지 않는다. 따라서 실제 비율은 달라질 수 있으며, 안전한 경계가 없거나 timestamp 파싱이 실패하면 중단한다.
+  4. **Leakage 방지:** 동일한 생성 계약의 Train·Validation·Test만 사용하며 원본 행 ID와 split 역할을 검증한다. `label`, `timestamp`, Profile의 ID·그룹·제외 컬럼과 예약 split metadata는 모델 입력에서 제외한다. 수치형 median 대치·범주형 최빈값 대치/One-Hot Encoding·scaling·특징 선택은 Train/CV 학습 fold에서만 fit한다. Time Validation은 Train 이후 시간 범위인지도 검사한다.
   5. **Test set 봉인:** 후보 모델 비교, 특징 선택, threshold 결정에는 Test를 사용하지 않는다. 최종 모델과 threshold가 확정된 뒤에만 Test 성능을 한 번 평가한다.
-  6. **산출물 및 점검 기록:** `src/step3_split_data.py`, split별 행 인덱스 파일, split 요약을 만든다. 요약에는 각 split의 행 수·Fail 비율, Random split 인덱스 중복 여부, Time split의 시간 범위·timestamp 파싱 실패 수·동일 timestamp 처리 기준을 기록한다.
+  6. **산출물 및 점검 기록:** 팀원의 `src/step3_split.py`를 공식 진입점으로 유지한다. 기존 분할·EDA·요약·누수 검사 함수에 Profile 검증·그룹 경계·원본 행 ID·저장 전 검사를 통합한다. 기본 출력은 `data/splits/integrated/`의 여섯 split 및 `manifest.json`, `logs/step3_integrated/`의 요약·누수·시간 경계 점검이다. 각 CSV에는 `__source_row_id`, `__split_role`, `__split_protocol_id`를 보존한다. 기존 split 파일은 덮어쓰지 않고 검사 실패 시 저장을 중단한다. 그림은 `reports/figures/step3/`에 저장한다. 별도 `step3_split_data.py`는 중복 구현을 피하기 위해 제거한다.
+
+  **기존 결과 해석의 정정:** 기존 Time Validation 235행 중 163행이 Random Train에 포함돼 후보 비교·OOF 탐색에 사용됐다. 기존 시간 평가 수치를 독립적인 미사용 holdout 성능으로 주장하지 않는다. 위 교정 경로로 재실행하더라도 이미 관찰한 데이터가 다시 미사용 데이터가 되는 것은 아니며, 엄격한 최종 일반화 확인에는 별도의 미사용 데이터가 필요하다.
 
 - [x] Python 환경과 `requirements.txt` 구성 확인
 
@@ -100,8 +102,8 @@ Model freeze → Final test (once) → Model bundle
 
 ### B — 양현승 (모델링·평가)
 
-- [ ] `SimpleImputer(median) → StandardScaler → LogisticRegression` baseline 구현
-- [ ] Recall, AP, Precision, F1, ROC-AUC, 학습 시간을 기록
+- [x] `SimpleImputer(median) → StandardScaler → LogisticRegression` baseline 구현
+- [x] Recall, AP, Precision, F1, ROC-AUC, 학습 시간을 기록
 
 ### 공동
 
@@ -121,12 +123,12 @@ Model freeze → Final test (once) → Model bundle
 
 ### B — 양현승 (모델링·평가)
 
-- [ ] PCA(누적 설명 분산 90%) 실험
-- [ ] L1 Logistic Regression 기반 특징 선택
-- [ ] Random Forest/LightGBM Feature Importance 기반 Top-K 비교 (100/50/30/20/10)
-- [ ] Logistic Regression, SVM, Random Forest, LightGBM 비교
-- [ ] `class_weight` 또는 `scale_pos_weight` 적용 비교
-- [ ] Repeated Stratified K-Fold로 평균 ± 표준편차 기록
+- [x] PCA(누적 설명 분산 90%) 실험
+- [x] L1 Logistic Regression 기반 특징 선택
+- [x] Random Forest/LightGBM Feature Importance 기반 Top-K 비교 (100/50/30/20/10)
+- [x] Logistic Regression, SVM, Random Forest, LightGBM 비교
+- [x] `class_weight` 또는 `scale_pos_weight` 적용 비교
+- [x] Repeated Stratified K-Fold로 평균 ± 표준편차 기록
 
 ### 공동
 
@@ -146,10 +148,26 @@ Model freeze → Final test (once) → Model bundle
 
 ### B — 양현승 (모델링·평가)
 
-- [ ] OOF prediction 생성
-- [ ] Threshold별 Recall, Precision, FN, FP 비교
+- [x] OOF prediction 생성
+- [x] Threshold별 Recall, Precision, FN, FP 비교
 - [ ] FN/FP trade-off를 바탕으로 최종 threshold 결정
 - [ ] Isolation Forest와 PCA reconstruction error를 보조 실험으로 비교
+
+#### Threshold 결정 기준 및 현재 프로젝트 후보
+
+- Threshold는 후보 모델을 고정한 뒤 `data/splits/integrated/time_train.csv` 내부의 OOF 확률로만 비교한다. 외부 Time Validation과 Test는 threshold 탐색에 사용하지 않는다. 그룹이 있으면 그룹 분리를 적용한다.
+  - **이유:** Time Validation은 시간 순서 일반화 확인용이고, Test는 최종 성능 확인용이다. 두 데이터를 threshold에 맞추면 평가 데이터에 과적합될 수 있다.
+- 최종 모델은 미확정이다. `lightgbm_all`과 `l1_balanced_l1_select`의 기존 비교는 탐색 결과로 보존하고, 교정된 Time Train 내부에서 후보를 다시 선정한다. Time Validation 결과를 활용해 다시 개선하면 해당 구간은 개발용 검증 데이터로 취급한다.
+  - **이유:** 기존 Random Train과 Time Validation은 겹치며, 시간 검증 결과도 이미 관찰했으므로 사전 선정·독립 검증으로 소급 해석할 수 없다.
+- 기존 Random Train OOF의 F1 최대 비교값 `0.000475`는 탐색 기록으로만 보존한다. 해당 결과는 Recall `0.329`, Precision `0.218`, F1 `0.262`, FN `49`, FP `86`이며 새 평가에 그대로 승계하지 않는다.
+  - **이유:** 현재 데이터에는 현장의 재검사 처리 용량, Lot hold 비용, 불량 유출 비용이 없으므로 임의의 현장 비용을 가정하지 않는다. 따라서 OOF F1 최대 지점을 비교 기준 후보로 사용한다.
+- `0.000475`는 현장 자동 폐기 또는 Lot hold 기준이 아니라 프로젝트 평가용 후보값이다. 실제 현장 적용 시에는 허용 가능한 재검사 건수, FP 비용, FN 비용을 정의하고 그 제약 아래에서 다시 결정한다.
+  - **이유:** 반도체 공정의 FP 허용 수준은 검사 위치와 후속 조치에 따라 달라 단일 비율로 일반화할 수 없다.
+- 후보 threshold를 정한 뒤에는 같은 값을 Time Validation에 그대로 적용해 시간 구간의 FN·FP를 확인한다. Time Validation 결과를 보고 threshold를 다시 조정하지 않는다.
+  - **이유:** 시간 데이터로 threshold를 재조정하면 시간 검증이 또 다른 튜닝 데이터가 되어 일반화 성능을 과대평가할 수 있다.
+- 모델·특성 집합·threshold를 모두 고정한 뒤에만 Test를 한 번 평가한다.
+  - **이유:** Test set을 최종 확인용으로 보존해 성능 추정의 낙관 편향을 막는다.
+- 반복 OOF의 평균 확률과 단일 재학습 모델의 확률은 척도가 같다고 보장하지 않는다. 평균 방식·확률 보정·시간 순서 내부 검증에 대한 확인은 별도 후속 과제로 남기며, 현재 성능 하락을 drift만의 결과로 단정하지 않는다.
 
 ### 공동
 

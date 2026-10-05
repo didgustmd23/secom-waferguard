@@ -14,8 +14,10 @@ import pandas as pd
 # `python -m src...` 실행과 `python src/<script>.py` 직접 실행을 모두 지원한다.
 try:
     from src.modeling_config import DatasetSpec
+    from src.split_contract import SPLIT_METADATA
 except ModuleNotFoundError:
     from modeling_config import DatasetSpec
+    from split_contract import SPLIT_METADATA
 
 
 # ==========================================
@@ -32,7 +34,7 @@ def resolve_feature_columns(
 
     # DataFrame의 중복 컬럼은 선택·로그·Pipeline에서 모호하므로 허용하지 않음
     if len(columns) != len(set(columns)):
-        raise ValueError("dataset columns must not contain duplicates")
+        raise ValueError("데이터셋 column 이름에 중복이 있으면 안 됩니다")
 
     # Label·Timestamp·ID·Group·명시적 제외 컬럼이 실제 입력에 존재하는지 확인
     required_columns = [dataset.label_column]
@@ -43,10 +45,10 @@ def resolve_feature_columns(
     required_columns.extend(dataset.excluded_feature_columns)
     missing_columns = [column for column in required_columns if column not in columns]
     if missing_columns:
-        raise ValueError(f"dataset is missing required columns: {missing_columns}")
+        raise ValueError(f"데이터셋에 필수 column이 없습니다: {missing_columns}")
 
     # 모델 입력에서 제외할 역할 컬럼을 먼저 구성한다.
-    non_feature_columns = set(required_columns)
+    non_feature_columns = set(required_columns) | set(SPLIT_METADATA)
 
     # Profile이 지정한 방식으로 feature 후보를 일관되게 선택
     if dataset.feature_selection_mode == "prefix":
@@ -62,11 +64,11 @@ def resolve_feature_columns(
         )
     else:
         # load_dataset_spec이 이미 검증하지만 직접 DatasetSpec을 만들었을 때도 방어
-        raise ValueError(f"unsupported feature selection mode: {dataset.feature_selection_mode}")
+        raise ValueError(f"지원하지 않는 feature 선택 방식입니다: {dataset.feature_selection_mode}")
 
     # 모델 입력 feature가 하나도 없으면 이후 Pipeline 오류 대신 명확한 원인을 제공
     if not feature_columns:
-        raise ValueError("dataset profile did not select any feature columns")
+        raise ValueError("Dataset Profile에서 선택된 feature column이 없습니다")
 
     return feature_columns
 
@@ -83,14 +85,14 @@ def validate_dataset_frame(dataframe: pd.DataFrame, dataset: DatasetSpec) -> tup
     # Label 결측은 클래스 비율·평가 지표를 왜곡하므로 즉시 차단
     labels = dataframe[dataset.label_column]
     if labels.isna().any():
-        raise ValueError(f"dataset column '{dataset.label_column}' contains missing labels")
+        raise ValueError(f"데이터셋 column '{dataset.label_column}'에 결측 label이 있습니다")
 
     # Dataset Profile에 선언된 정상·불량 Label 외 값이 포함되었는지 확인
     allowed_labels = {dataset.negative_label, dataset.positive_label}
     invalid_labels = labels[~labels.isin(allowed_labels)].unique().tolist()
     if invalid_labels:
         raise ValueError(
-            f"dataset column '{dataset.label_column}' contains unsupported labels: "
+            f"데이터셋 column '{dataset.label_column}'에 지원하지 않는 label이 있습니다: "
             f"{invalid_labels}"
         )
 
@@ -99,7 +101,7 @@ def validate_dataset_frame(dataframe: pd.DataFrame, dataset: DatasetSpec) -> tup
     unknown_categorical_columns = sorted(categorical_columns - set(feature_columns))
     if unknown_categorical_columns:
         raise ValueError(
-            "profile categorical feature columns are not selected features: "
+            "Profile에 선언된 범주형 feature가 선택된 feature에 없습니다: "
             f"{unknown_categorical_columns}"
         )
     non_numeric_columns = [
@@ -110,7 +112,7 @@ def validate_dataset_frame(dataframe: pd.DataFrame, dataset: DatasetSpec) -> tup
     ]
     if non_numeric_columns:
         raise ValueError(
-            "non-categorical features must have numeric dtype: "
+            "범주형으로 선언되지 않은 feature는 숫자형 dtype이어야 합니다: "
             f"{non_numeric_columns}"
         )
 

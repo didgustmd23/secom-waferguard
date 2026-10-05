@@ -15,25 +15,26 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from time import perf_counter
 
 import pandas as pd
-from sklearn.compose import ColumnTransformer
-from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 try:
     from src.dataset_schema import validate_dataset_frame
     from src.modeling_config import DEFAULT_CONFIG_PATH, DatasetSpec, ModelingConfig, load_modeling_config
     from src.modeling_metrics import BinaryMetrics, evaluate_binary_scores
+    from src.modeling_preprocessing import preprocessing_steps
+    from src.split_contract import validate_split_pair
 except ModuleNotFoundError:
     from dataset_schema import validate_dataset_frame
     from modeling_config import DEFAULT_CONFIG_PATH, DatasetSpec, ModelingConfig, load_modeling_config
     from modeling_metrics import BinaryMetrics, evaluate_binary_scores
+    from modeling_preprocessing import preprocessing_steps
+    from split_contract import validate_split_pair
 
 
 # ==========================================
@@ -50,6 +51,9 @@ class BaselineResult:
     feature_count: int
     training_seconds: float
     metrics: BinaryMetrics
+    split_strategy: str | None = None
+    train_path: str | None = None
+    validation_path: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         # metrics 객체를 평탄화하여 CSV의 한 행으로 바로 저장할 수 있게 만든다.
@@ -60,6 +64,9 @@ class BaselineResult:
             "validation_samples": self.validation_samples,
             "feature_count": self.feature_count,
             "training_seconds": self.training_seconds,
+            "split_strategy": self.split_strategy,
+            "train_path": self.train_path,
+            "validation_path": self.validation_path,
             **asdict(self.metrics),
         }
 
@@ -84,61 +91,10 @@ def build_baseline_pipeline(
             f"{unknown_categorical}"
         )
 
-    # 선언된 범주형 feature와 나머지 수치형 feature를 분리한다.
-    categorical_columns = tuple(
-        column for column in feature_columns if column in dataset.categorical_feature_columns
-    )
-    numeric_columns = tuple(
-        column for column in feature_columns if column not in categorical_columns
-    )
-
-    # SECOM처럼 수치형 feature만 있으면 계획서의 Pipeline 구조를 그대로 사용한다.
-    if not categorical_columns:
-        return Pipeline(
-            steps=[
-                ("imputer", SimpleImputer(strategy="median")),
-                ("scaler", StandardScaler()),
-                (
-                    "model",
-                    LogisticRegression(max_iter=1000, random_state=random_state),
-                ),
-            ]
-        )
-
-    # 범주형 데이터셋에도 재사용할 수 있도록 각 타입에 맞는 전처리를 명시한다.
-    transformers: list[tuple[str, Pipeline, tuple[str, ...]]] = []
-    if numeric_columns:
-        transformers.append(
-            (
-                "numeric",
-                Pipeline(
-                    steps=[
-                        ("imputer", SimpleImputer(strategy="median")),
-                        ("scaler", StandardScaler()),
-                    ]
-                ),
-                numeric_columns,
-            )
-        )
-    transformers.append(
-        (
-            "categorical",
-            Pipeline(
-                steps=[
-                    ("imputer", SimpleImputer(strategy="most_frequent")),
-                    ("encoder", OneHotEncoder(handle_unknown="ignore")),
-                ]
-            ),
-            categorical_columns,
-        )
-    )
-
-    return Pipeline(
-        steps=[
-            ("preprocessor", ColumnTransformer(transformers=transformers)),
-            ("model", LogisticRegression(max_iter=1000, random_state=random_state)),
-        ]
-    )
+    # Baseline과 후보·특징 선택 실험이 동일한 타입별 전처리 코어를 재사용한다.
+    return Pipeline(preprocessing_steps(dataset, scale=True) + [
+        ("model", LogisticRegression(max_iter=1000, random_state=random_state)),
+    ])
 
 
 # ==========================================
@@ -192,6 +148,8 @@ def run_baseline(
             f"입력값: '{config.baseline_model}'"
         )
 
+    # split의 역할·원본 행 중복을 모델 학습 전에 검사한다.
+    validate_split_pair(train_frame, validation_frame, config.dataset)
     # Train feature를 기준으로 Validation feature의 구성과 순서를 검증한다.
     train_x, train_y, feature_columns = split_frame_to_xy(train_frame, config.dataset)
     validation_x, validation_y, _ = split_frame_to_xy(
@@ -268,14 +226,29 @@ def run_baseline_from_files(
     train_path: Path | str,
     validation_path: Path | str,
     output_path: Path | str,
+    *,
+    split_strategy: str,
 ) -> BaselineResult:
+    # 결과 로그에 남길 split 방식은 비어 있지 않은 문자열이어야 한다.
+    if not split_strategy.strip():
+        raise ValueError("split_strategy는 비어 있지 않은 문자열이어야 합니다")
+
     # 공통 설정과 두 split 파일을 명시적으로 읽는다.
     config = load_modeling_config(config_path)
     train_frame = pd.read_csv(train_path)
     validation_frame = pd.read_csv(validation_path)
+    if split_strategy == "time":
+        validate_split_pair(train_frame, validation_frame, config.dataset, temporal=True)
+
+    # 실행에 사용한 split 방식과 상대 경로를 결과에도 남겨 파일명에만 의존하지 않게 한다.
+    result = replace(
+        run_baseline(train_frame, validation_frame, config),
+        split_strategy=split_strategy,
+        train_path=Path(train_path).as_posix(),
+        validation_path=Path(validation_path).as_posix(),
+    )
 
     # Train/Validation 결과만 저장하고 Test 성능은 이 단계에서 계산하지 않는다.
-    result = run_baseline(train_frame, validation_frame, config)
     write_baseline_result(result, output_path)
     return result
 
@@ -286,6 +259,7 @@ def _parse_arguments() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--train", type=Path, required=True)
     parser.add_argument("--validation", type=Path, required=True)
+    parser.add_argument("--split-strategy", type=str, required=True)
     parser.add_argument("--output", type=Path, default=Path("logs/baseline_result.csv"))
     return parser.parse_args()
 
@@ -298,9 +272,11 @@ def main() -> None:
         arguments.train,
         arguments.validation,
         arguments.output,
+        split_strategy=arguments.split_strategy,
     )
     print(f"데이터셋 ID: {result.dataset_id}")
     print(f"모델: {result.model_name}")
+    print(f"Split 방식: {result.split_strategy}")
     print(f"Train 표본 수: {result.train_samples}")
     print(f"Validation 표본 수: {result.validation_samples}")
     print(f"Fail Recall: {result.metrics.recall:.4f}")

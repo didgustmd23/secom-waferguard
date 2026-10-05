@@ -79,7 +79,7 @@ class DatasetSchemaTest(unittest.TestCase):
             {"machine": ["A", "B"], "target": ["no", "yes"]}
         )
 
-        with self.assertRaisesRegex(ValueError, "must have numeric dtype"):
+        with self.assertRaisesRegex(ValueError, "숫자형 dtype이어야"):
             validate_dataset_frame(dataframe, self.generic_dataset)
 
     # 명시적으로 선언한 범주형 feature는 수치형 검증 대상에서 제외
@@ -110,7 +110,7 @@ class DatasetSchemaTest(unittest.TestCase):
     def test_rejects_missing_label(self) -> None:
         dataframe = pd.DataFrame({"feature": [1.0, 2.0], "target": ["no", None]})
 
-        with self.assertRaisesRegex(ValueError, "missing labels"):
+        with self.assertRaisesRegex(ValueError, "결측 label"):
             validate_dataset_frame(dataframe, self.generic_dataset)
 
     # Profile에 없는 Label은 모델링 전에 차단되는지 확인
@@ -119,5 +119,5 @@ class DatasetSchemaTest(unittest.TestCase):
             {"feature": [1.0, 2.0], "target": ["no", "unknown"]}
         )
 
-        with self.assertRaisesRegex(ValueError, "unsupported labels"):
+        with self.assertRaisesRegex(ValueError, "지원하지 않는 label"):
             validate_dataset_frame(dataframe, self.generic_dataset)

@@ -50,7 +50,7 @@ class IngestionSpec:
             if source.name == name:
                 return source
         # 잘못된 source 이름은 병합 전에 명확한 Profile 오류로 중단한다.
-        raise ValueError(f"ingestion source is not defined: {name}")
+        raise ValueError(f"ingestion source가 정의되어 있지 않습니다: {name}")
 
 
 # ==========================================
@@ -128,12 +128,12 @@ class ModelingConfig:
 def _require_mapping(source: dict[str, Any], key: str) -> dict[str, Any]:
     # 지정한 Key가 존재하는지 먼저 확인
     if key not in source:
-        raise ValueError(f"configuration is missing required key: {key}")
+        raise ValueError(f"설정에 필수 key가 없습니다: {key}")
 
     # 하위 설정은 JSON Object여야 하므로 List·문자열·숫자는 차단
     value = source[key]
     if not isinstance(value, dict):
-        raise ValueError(f"configuration key '{key}' must be an object")
+        raise ValueError(f"설정 key '{key}'는 object여야 합니다")
 
     return value
 
@@ -148,7 +148,7 @@ def _require_value(
 ) -> Any:
     # 지정한 Key가 존재하는지 확인
     if key not in source:
-        raise ValueError(f"configuration is missing required key: {key}")
+        raise ValueError(f"설정에 필수 key가 없습니다: {key}")
 
     value = source[key]
 
@@ -157,13 +157,13 @@ def _require_value(
         isinstance(expected_type, tuple) and int in expected_type
     )
     if integer_allowed and isinstance(value, bool):
-        raise ValueError(f"configuration key '{key}' must be an integer")
+        raise ValueError(f"설정 key '{key}'는 정수여야 합니다")
 
     # 설정값의 실제 타입이 기대한 JSON 타입과 같은지 확인
     if not isinstance(value, expected_type):
         expected_types = expected_type if isinstance(expected_type, tuple) else (expected_type,)
         expected_name = " or ".join(item.__name__ for item in expected_types)
-        raise ValueError(f"configuration key '{key}' must be {expected_name}")
+        raise ValueError(f"설정 key '{key}'는 {expected_name} 자료형이어야 합니다")
 
     return value
 
@@ -180,10 +180,10 @@ def _load_optional_column_names(source: dict[str, Any], key: str) -> tuple[str, 
     if not isinstance(value, list) or not all(
         isinstance(column, str) and column for column in value
     ):
-        raise ValueError(f"configuration key '{key}' must be a list of non-empty strings")
+        raise ValueError(f"설정 key '{key}'는 비어 있지 않은 문자열 목록이어야 합니다")
     # 같은 역할을 두 번 선언하면 feature 제외 규칙이 모호해지므로 차단한다.
     if len(value) != len(set(value)):
-        raise ValueError(f"configuration key '{key}' must not contain duplicates")
+        raise ValueError(f"설정 key '{key}'에 중복값이 있으면 안 됩니다")
     return tuple(value)
 
 
@@ -198,13 +198,13 @@ def _load_json_object(path: Path) -> dict[str, Any]:
         with path.open(encoding="utf-8") as config_file:
             raw_config = json.load(config_file)
     except FileNotFoundError as error:
-        raise FileNotFoundError(f"configuration file not found: {path}") from error
+        raise FileNotFoundError(f"설정 파일을 찾을 수 없습니다: {path}") from error
     except json.JSONDecodeError as error:
-        raise ValueError(f"configuration file is not valid JSON: {path}") from error
+        raise ValueError(f"설정 파일이 올바른 JSON 형식이 아닙니다: {path}") from error
 
     # 최상위 구조는 이름 기반 설정을 위한 JSON Object여야 함
     if not isinstance(raw_config, dict):
-        raise ValueError(f"configuration root must be an object: {path}")
+        raise ValueError(f"설정 파일의 최상위 구조는 object여야 합니다: {path}")
 
     return raw_config
 
@@ -239,16 +239,16 @@ def load_dataset_spec(
     timestamp_column = columns.get("timestamp")
     timestamp_format = columns.get("timestamp_format")
     if timestamp_column is not None and not isinstance(timestamp_column, str):
-        raise ValueError("configuration key 'columns.timestamp' must be string or null")
+        raise ValueError("설정 key 'columns.timestamp'는 문자열 또는 null이어야 합니다")
     if timestamp_format is not None and not isinstance(timestamp_format, str):
-        raise ValueError("configuration key 'columns.timestamp_format' must be string or null")
+        raise ValueError("설정 key 'columns.timestamp_format'는 문자열 또는 null이어야 합니다")
     if (timestamp_column is None) != (timestamp_format is None):
-        raise ValueError("columns.timestamp and columns.timestamp_format must be set together")
+        raise ValueError("columns.timestamp와 columns.timestamp_format은 함께 설정해야 합니다")
 
     # ID·그룹·명시적 제외 컬럼은 모델 입력에서 반드시 제외할 Dataset Profile 역할
     raw_column_roles = raw_profile.get("column_roles", {})
     if not isinstance(raw_column_roles, dict):
-        raise ValueError("configuration key 'column_roles' must be an object")
+        raise ValueError("설정 key 'column_roles'는 object여야 합니다")
     id_columns = _load_optional_column_names(raw_column_roles, "id_columns")
     group_columns = _load_optional_column_names(raw_column_roles, "group_columns")
     excluded_feature_columns = _load_optional_column_names(
@@ -256,7 +256,7 @@ def load_dataset_spec(
     )
     role_columns = id_columns + group_columns + excluded_feature_columns
     if len(role_columns) != len(set(role_columns)):
-        raise ValueError("column role lists must not contain the same column twice")
+        raise ValueError("column 역할 목록에 같은 column을 두 번 지정하면 안 됩니다")
 
     # Label·timestamp는 이미 모델 입력에서 제외되므로 역할 목록에 중복 선언하지 않음
     reserved_columns = {label_column}
@@ -265,14 +265,14 @@ def load_dataset_spec(
     duplicated_roles = [column for column in role_columns if column in reserved_columns]
     if duplicated_roles:
         raise ValueError(
-            "column role lists must not repeat label or timestamp columns: "
+            "column 역할 목록에 label 또는 timestamp column을 중복 지정하면 안 됩니다: "
             f"{duplicated_roles}"
         )
 
     # 범주형 feature는 명시적으로 선언하고, 나머지 선택 feature는 수치형으로 검증한다.
     raw_feature_types = raw_profile.get("feature_types", {})
     if not isinstance(raw_feature_types, dict):
-        raise ValueError("configuration key 'feature_types' must be an object")
+        raise ValueError("설정 key 'feature_types'는 object여야 합니다")
     categorical_feature_columns = _load_optional_column_names(
         raw_feature_types, "categorical_columns"
     )
@@ -281,7 +281,7 @@ def load_dataset_spec(
     ]
     if invalid_categorical_roles:
         raise ValueError(
-            "feature_types.categorical_columns must not include label or timestamp: "
+            "feature_types.categorical_columns에 label 또는 timestamp를 포함하면 안 됩니다: "
             f"{invalid_categorical_roles}"
         )
     overlapping_roles = [
@@ -289,7 +289,7 @@ def load_dataset_spec(
     ]
     if overlapping_roles:
         raise ValueError(
-            "feature_types.categorical_columns must not include non-feature columns: "
+            "feature_types.categorical_columns에 feature가 아닌 column을 포함하면 안 됩니다: "
             f"{overlapping_roles}"
         )
 
@@ -298,22 +298,22 @@ def load_dataset_spec(
     positive_label = _require_value(labels, "positive", label_types)
     negative_label = _require_value(labels, "negative", label_types)
     if isinstance(positive_label, bool) or isinstance(negative_label, bool):
-        raise ValueError("labels.positive and labels.negative must not be bool")
+        raise ValueError("labels.positive와 labels.negative는 bool 값이면 안 됩니다")
     if positive_label == negative_label:
-        raise ValueError("labels.positive and labels.negative must be different")
+        raise ValueError("labels.positive와 labels.negative는 서로 달라야 합니다")
 
     # Feature 선택 방법을 읽고 prefix 방식일 때만 prefix 값을 요구
     feature_selection_mode = _require_value(feature_columns, "selection", str)
     feature_column_prefix = feature_columns.get("prefix")
     if feature_selection_mode not in {"prefix", "all_except_metadata"}:
         raise ValueError(
-            "feature_columns.selection must be 'prefix' or 'all_except_metadata'"
+            "feature_columns.selection은 'prefix' 또는 'all_except_metadata'여야 합니다"
         )
     if feature_selection_mode == "prefix":
         if not isinstance(feature_column_prefix, str) or not feature_column_prefix:
-            raise ValueError("feature_columns.prefix must be a non-empty string for prefix mode")
+            raise ValueError("prefix 방식의 feature_columns.prefix는 비어 있지 않은 문자열이어야 합니다")
     elif feature_column_prefix is not None:
-        raise ValueError("feature_columns.prefix must be null for all_except_metadata mode")
+        raise ValueError("all_except_metadata 방식의 feature_columns.prefix는 null이어야 합니다")
 
     # 결측률·분산 규칙은 Dataset Profile별 데이터 품질 정책으로 관리
     missing_ratio_threshold = float(
@@ -321,14 +321,14 @@ def load_dataset_spec(
     )
     drop_zero_variance = _require_value(quality_rules, "drop_zero_variance", bool)
     if not 0.0 <= missing_ratio_threshold <= 1.0:
-        raise ValueError("quality_rules.missing_ratio_threshold must be between 0 and 1")
+        raise ValueError("quality_rules.missing_ratio_threshold는 0 이상 1 이하여야 합니다")
 
     # 원본 파일 형식이 정의된 경우 source 목록과 adapter 설정을 함께 검증
     ingestion: IngestionSpec | None = None
     raw_ingestion = raw_profile.get("ingestion")
     if raw_ingestion is not None:
         if not isinstance(raw_ingestion, dict):
-            raise ValueError("configuration key 'ingestion' must be an object or null")
+            raise ValueError("설정 key 'ingestion'은 object 또는 null이어야 합니다")
 
         # adapter는 source를 canonical table로 결합하는 규칙만 식별
         adapter = _require_value(raw_ingestion, "adapter", str)
@@ -336,11 +336,11 @@ def load_dataset_spec(
         # 각 원본 source의 이름·경로·읽기 옵션을 Profile에서 독립적으로 읽음
         raw_sources = _require_value(raw_ingestion, "sources", list)
         if not raw_sources:
-            raise ValueError("ingestion.sources must contain at least one source")
+            raise ValueError("ingestion.sources에는 source가 하나 이상 있어야 합니다")
         sources: list[IngestionSourceSpec] = []
         for raw_source in raw_sources:
             if not isinstance(raw_source, dict):
-                raise ValueError("each ingestion source must be an object")
+                raise ValueError("각 ingestion source는 object여야 합니다")
             source_name = _require_value(raw_source, "name", str)
             source_path = Path(_require_value(raw_source, "path", str))
             read_csv_options = _require_mapping(raw_source, "read_csv_options")
@@ -354,12 +354,12 @@ def load_dataset_spec(
                 )
             )
         if len({source.name for source in sources}) != len(sources):
-            raise ValueError("ingestion.sources names must be unique")
+            raise ValueError("ingestion.sources의 name은 중복되면 안 됩니다")
 
         # adapter_options는 source 결합 규칙처럼 adapter 전용 설정을 담는다.
         adapter_options = raw_ingestion.get("adapter_options", {})
         if not isinstance(adapter_options, dict):
-            raise ValueError("ingestion.adapter_options must be an object")
+            raise ValueError("ingestion.adapter_options는 object여야 합니다")
 
         ingestion = IngestionSpec(
             adapter=adapter,
@@ -432,26 +432,26 @@ def load_modeling_config(config_path: Path | str = DEFAULT_CONFIG_PATH) -> Model
 
     # 실험 수치의 허용 범위를 검증
     if not 0.0 < default_threshold < 1.0:
-        raise ValueError("experiment.default_threshold must be between 0 and 1")
+        raise ValueError("experiment.default_threshold는 0 초과 1 미만이어야 합니다")
     if not 0.0 < pca_explained_variance <= 1.0:
-        raise ValueError("experiment.pca_explained_variance must be in (0, 1]")
+        raise ValueError("experiment.pca_explained_variance는 0 초과 1 이하여야 합니다")
     if n_splits < 2 or n_repeats < 1:
-        raise ValueError("cross_validation requires n_splits >= 2 and n_repeats >= 1")
+        raise ValueError("cross_validation은 n_splits >= 2 및 n_repeats >= 1이어야 합니다")
 
     # 문자열 목록과 Top-K 목록의 내용까지 검증
     if not primary_metrics or not all(isinstance(metric, str) for metric in primary_metrics):
-        raise ValueError("metrics.primary must contain at least one metric name")
+        raise ValueError("metrics.primary에는 지표 이름이 하나 이상 있어야 합니다")
     if not secondary_metrics or not all(isinstance(metric, str) for metric in secondary_metrics):
-        raise ValueError("metrics.secondary must contain metric names")
+        raise ValueError("metrics.secondary에는 지표 이름이 있어야 합니다")
     if not baseline_model:
-        raise ValueError("models.baseline must not be empty")
+        raise ValueError("models.baseline은 비어 있으면 안 됩니다")
     if not candidate_models or not all(isinstance(model, str) for model in candidate_models):
-        raise ValueError("models.candidates must contain at least one model name")
+        raise ValueError("models.candidates에는 모델 이름이 하나 이상 있어야 합니다")
     if not top_k_feature_counts or not all(
         isinstance(count, int) and not isinstance(count, bool) and count > 0
         for count in top_k_feature_counts
     ):
-        raise ValueError("feature_selection.top_k_feature_counts must contain positive integers")
+        raise ValueError("feature_selection.top_k_feature_counts에는 양의 정수만 포함되어야 합니다")
 
     # Dataset Profile과 실험 설정을 하나의 범용 모델링 설정 객체로 반환
     return ModelingConfig(
