@@ -13,9 +13,9 @@
 | 범용 설정 코어 | 완료 | `config.json`과 Dataset Profile을 분리해 로드·검증 |
 | 데이터 구조 검증 | 완료 | Profile 기준 label·metadata·feature 컬럼 검증 |
 | 공통 평가 | 완료 | Profile label 기반 Recall, AP, Precision, F1, ROC-AUC 계산 |
-| 자동 테스트 | 완료 | 설정·schema·평가·병합·품질 점검·후보 모델·특징 선택·OOF threshold 비교 38개 테스트 |
+| 자동 테스트 | 완료 | 설정·schema·평가·전처리·split 계약·실험 함수 62개 테스트 |
 | 데이터 병합·품질 점검 | 완료 | Profile 기반 canonical 병합과 재생성 가능한 품질 로그 |
-| Random / Time split | 완료 | 70/15/15 split 생성. `step3_split.py`의 재현성·시간 경계 그룹 처리는 검토·보완 중 |
+| Random / Time split | 구현 완료 | 팀원의 `step3_split.py`에 Profile·누수 검사·원본 ID를 통합. Random은 탐색용, 후보 비교·OOF는 Time Train 사용 |
 | Baseline | 완료 | Train/Validation 기반 Logistic Regression 평가 및 공통 지표 기록 |
 | 후보 모델·불균형 비교 | 완료 | L1 Logistic Regression, RBF SVM, Random Forest, LightGBM, class weight 비교 |
 | 특징 선택 비교 | 완료 | PCA 90%, L1 선택, LightGBM Top-K(100/50/30/20/10)를 CV 학습 fold 내부에서 비교 |
@@ -23,6 +23,8 @@
 | Time Validation | 완료 | LightGBM 전체 특성 및 L1 선택 후보의 시간 구간 일반화 성능 확인 |
 | OOF threshold 비교 | 완료 | LightGBM 전체 특성의 OOF 확률과 threshold별 Recall·Precision·FN·FP 기록 |
 | 최종 Test·모델 배포 | 미완료 | Time Validation 성능 개선·모델 재선정 후 Test 1회 평가, Pipeline 저장·Model Card·예측 CLI 구현 예정 |
+
+기존 Time Validation 235행 중 163행이 Random Train에도 포함되어 있었다. 아래 기존 성능 수치는 **탐색 실험 기록**이며 독립적인 미사용 holdout 평가로 해석하지 않는다. 교정된 실행 경로는 시간 split을 먼저 생성하고, 동일한 Time Train에서 후보 비교·특징 선택·OOF를 수행한다. 이미 관찰한 데이터의 재분할이 새로운 미사용 평가 데이터를 만들지는 않으므로, 엄격한 최종 검증에는 별도의 미사용 데이터가 필요하다.
 
 ## 프로젝트 목표
 
@@ -244,26 +246,37 @@ python src/step2_data_check.py
 
 ### 모델링 실험
 
-`step3_split.py`는 split 재현성과 시간 경계 처리를 검토·보완 중이다. 이미 생성된 split 결과로 아래 모델링 실험을 재실행할 수 있다.
+팀원의 `step3_split.py`를 공식 진입점으로 사용한다. 기존 Random/Time 분할·EDA·클래스 요약·누수 검사 함수를 유지하면서 공통 Profile 검증과 원본 ID·split 계약을 통합했다. 별도 `step3_split_data.py`는 제거했다. 기본 출력은 `data/splits/integrated/`, 점검 로그는 `logs/step3_integrated/`, 그림은 `reports/figures/step3/`이며 기존 split CSV는 덮어쓰지 않는다.
 
 ```powershell
-# Random Train/Validation baseline
-python src/step4_baseline.py --train data/splits/random_train.csv --validation data/splits/random_valid.csv --split-strategy random --output logs/baseline_random_result.csv
+# 시간 holdout을 먼저 분리 (70/15/15는 목표 비율이며 동일 timestamp·그룹은 분리하지 않음)
+python src/step3_split.py
 
-# Random Train 내부 반복 CV 후보 모델 비교
-python src/step5_model_compare.py --train data/splits/random_train.csv --output logs/model_compare.csv
+# Time Train/Validation baseline
+python src/step4_baseline.py --train data/splits/integrated/time_train.csv --validation data/splits/integrated/time_valid.csv --split-strategy time --output logs/integrated/baseline.csv
+
+# 동일한 Time Train 내부 반복 CV 후보 모델 비교
+python src/step5_model_compare.py --train data/splits/integrated/time_train.csv --output logs/integrated/model_compare.csv
 
 # PCA·L1·LightGBM Top-K 특징 선택 비교
-python src/step6_feature_compare.py --train data/splits/random_train.csv --output logs/feature_compare.csv --n-jobs -1
-
-# 사전 선택 후보에 OOF 후보 threshold를 그대로 적용한 시간 구간 검증
-python src/step7_time_validation.py --train data/splits/time_train.csv --validation data/splits/time_valid.csv --experiments lightgbm_all --threshold 0.000475 --output logs/time_validation_compare.csv --n-jobs -1
+python src/step6_feature_compare.py --train data/splits/integrated/time_train.csv --output logs/integrated/feature_compare.csv --n-jobs -1
 
 # LightGBM 전체 특성의 OOF 확률·threshold 비교
-python src/step8_threshold_oof.py --train data/splits/random_train.csv --oof-output logs/lightgbm_oof_predictions.csv --threshold-output logs/threshold_compare.csv --n-jobs -1
+python src/step8_threshold_oof.py --train data/splits/integrated/time_train.csv --oof-output logs/integrated/oof_predictions.csv --threshold-output logs/integrated/threshold_compare.csv --n-jobs -1
+
+# 시간 검증: 생략 시 후보 비교 기본 threshold 사용. 새 Train에서 정한 값만 --threshold로 주입
+python src/step7_time_validation.py --train data/splits/integrated/time_train.csv --validation data/splits/integrated/time_valid.csv --experiments lightgbm_all --output logs/integrated/time_validation.csv --n-jobs -1
 ```
 
 `--n-jobs -1`은 LightGBM 내부 병렬 처리를 사용한다. 환경 자원이 제한된 경우 기본값인 `1`을 사용한다.
+
+Step 3을 재실행할 때는 새로운 `--output-dir`과 `--log-dir`을 지정한다. `--config`, `--input`, `--figures-dir`로 경로를 변경할 수 있고, `--skip-eda`는 분할·검사만 수행한다. 그룹이 없는 Random split은 기존 stratify 방식을 유지한다. 그룹이 선언되면 GroupShuffleSplit을 사용하므로 정확한 행 비율·class 비율은 보장되지 않으며 실제 비율을 요약에서 확인한다. 누수 검사 실패 시 split CSV를 저장하지 않고 오류로 종료한다.
+
+위 LightGBM 명령은 실행 예시이며 최종 후보 확정을 뜻하지 않는다. 기존 `0.000475`를 새 평가 threshold로 그대로 승계하지 않는다. OOF 평균 확률과 단일 재학습 모델의 척도 차이·시간순 내부 검증은 후속 점검 대상이다.
+
+새 split의 `__source_row_id`는 원본 CSV 내 행 위치, `__split_role`은 train/validation/test, `__split_protocol_id`는 원본·Profile·비율의 생성 계약 해시다. 이 컬럼들은 모델 입력에서 제외한다. Baseline·시간 검증은 중복 행과 계약 혼합을 검사하고, 후보 비교·OOF는 Validation/Test 역할의 입력을 거부한다. 기존 metadata 없는 CSV도 사용할 수 있지만 출처까지 보장하지 못하므로 탐색용으로만 취급한다.
+
+모든 모델링 Pipeline은 수치형 median 대치와 선언된 범주형 최빈값 대치/One-Hot Encoding을 공통으로 사용한다. 전부 결측인 수치형 컬럼은 0으로 보존한다. Top-K와 특징 수는 변환 후 기준이며 범주형 입력에서는 센서 원본 컬럼 수와 One-Hot 특징 수가 다를 수 있다.
 
 ## 프로젝트 디렉터리 구조
 
@@ -283,15 +296,18 @@ secom-waferguard/
 │   ├── modeling_config.py   # 공통 실험 설정·Dataset Profile 로드·검증
 │   ├── dataset_schema.py    # Profile 기반 feature·label 구조 검증
 │   ├── modeling_metrics.py  # Dataset Profile label 기반 공통 평가 함수
+│   ├── modeling_preprocessing.py # 모델 간 공통 수치형·범주형 전처리
+│   ├── split_contract.py    # split 역할·중복·시간 경계·그룹 CV 검사
 │   ├── step1_merge_data.py  # Profile ingestion 기반 원본 병합
 │   ├── step2_data_check.py  # EDA용 품질 로그 생성
-│   ├── step3_split.py       # Random / Time split 생성
+│   ├── step3_split.py       # 팀원 코드 기반 Random 탐색 / Time holdout 생성·검증
 │   ├── step3_drift_check.py # Time Train/Validation 분포 변화 진단
 │   ├── step4_baseline.py    # Train/Validation baseline 평가
 │   ├── step5_model_compare.py # 후보 모델 반복 CV 비교
 │   ├── step6_feature_compare.py # PCA·L1·Top-K 특징 선택 비교
 │   ├── step7_time_validation.py # 사전 선택 후보의 시간 구간 검증
-│   └── step8_threshold_oof.py # OOF threshold 비교
+│   ├── step8_threshold_oof.py # OOF threshold 비교
+│   └── step9_error_analysis.py # Time Validation FN/FP 분석
 ├── tests/                   # 설정·schema·평가·실험 함수 자동 테스트
 ├── logs/                    # 데이터·실험 결과 CSV
 ├── models/                  # model.joblib, model_card.json

@@ -1,6 +1,6 @@
 # ==========================================
 # 시간 기반 Validation에서 사전 선택 후보를 비교
-# - Random CV 결과로 미리 정한 후보만 Time Train으로 학습한다.
+# - Time Train 내부 CV 결과로 미리 정한 후보만 동일한 Time Train으로 학습한다.
 # - Time Validation은 시간 순서 일반화 확인용이며 threshold 탐색에는 사용하지 않는다.
 # - Test split은 이 단계에서 읽거나 평가하지 않는다.
 # ==========================================
@@ -20,14 +20,18 @@ try:
     from src.modeling_metrics import evaluate_binary_scores
     from src.step4_baseline import split_frame_to_xy
     from src.step6_feature_compare import build_experiments
+    from src.modeling_preprocessing import fitted_feature_count
+    from src.split_contract import PROTOCOL_ID, validate_split_pair
 except ModuleNotFoundError:
     from modeling_config import DEFAULT_CONFIG_PATH, ModelingConfig, load_modeling_config
     from modeling_metrics import evaluate_binary_scores
     from step4_baseline import split_frame_to_xy
     from step6_feature_compare import build_experiments
+    from modeling_preprocessing import fitted_feature_count
+    from split_contract import PROTOCOL_ID, validate_split_pair
 
 
-# Random CV 결과를 본 뒤, 시간 검증 전에 고정한 후보 목록이다.
+# 기존 탐색 단계의 비교 후보 목록이다. 새 평가에서도 후보를 Train 내부에서 사전 선정한다.
 # 이 목록을 시간 검증 결과에 따라 늘리면 Validation set에 과적합될 수 있다.
 PRESELECTED_EXPERIMENTS = (
     "lightgbm_all",
@@ -37,18 +41,12 @@ PRESELECTED_EXPERIMENTS = (
 
 # ==========================================
 # 학습된 Pipeline에서 실제 사용한 feature 개수를 계산
-# - selector가 없으면 입력 feature 전체를 사용한 모델이다.
+# - selector가 없으면 변환 후 모델 입력 수를 사용한다.
 # - L1 selector는 Train 데이터에서 선택된 support 개수만 기록한다.
 # ==========================================
 def _selected_feature_count(model, input_feature_count: int) -> int:
-    # selector가 없는 모델은 입력 feature 전체를 사용한 것으로 기록한다.
-    if "selector" not in model.named_steps:
-        return input_feature_count
-
-    selector = model.named_steps["selector"]
-    if not hasattr(selector, "get_support"):
-        raise ValueError("선택된 후보의 feature selector 결과를 확인할 수 없습니다.")
-    return int(selector.get_support().sum())
+    # 입력 수 대신 변환·선택 후 모델이 받은 실제 특징 수를 반환한다.
+    return fitted_feature_count(model)
 
 
 # ==========================================
@@ -68,6 +66,8 @@ def compare_time_validation(
 ) -> pd.DataFrame:
     if not experiment_names:
         raise ValueError("시간 검증할 후보 모델을 하나 이상 지정해야 합니다.")
+
+    validate_split_pair(train_frame, validation_frame, config.dataset, temporal=True)
 
     # Train의 feature 집합과 순서를 기준으로 Validation을 검증한다.
     train_x, train_y, feature_columns = split_frame_to_xy(train_frame, config.dataset)
@@ -126,6 +126,7 @@ def compare_time_validation(
             {
                 "dataset_id": config.dataset.dataset_id,
                 "split_strategy": "time_validation",
+                "training_protocol_id": train_frame[PROTOCOL_ID].iloc[0] if PROTOCOL_ID in train_frame else None,
                 "experiment": experiment_name,
                 "train_samples": len(train_frame),
                 "validation_samples": len(validation_frame),

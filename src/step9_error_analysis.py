@@ -18,10 +18,12 @@ try:
     from src.modeling_config import DEFAULT_CONFIG_PATH, ModelingConfig, load_modeling_config
     from src.step4_baseline import split_frame_to_xy
     from src.step6_feature_compare import build_experiments
+    from src.split_contract import SOURCE_ROW_ID, validate_split_pair
 except ModuleNotFoundError:
     from modeling_config import DEFAULT_CONFIG_PATH, ModelingConfig, load_modeling_config
     from step4_baseline import split_frame_to_xy
     from step6_feature_compare import build_experiments
+    from split_contract import SOURCE_ROW_ID, validate_split_pair
 
 
 EXPERIMENT_NAME = "lightgbm_all"
@@ -125,6 +127,9 @@ def compare_error_features(
     rows: list[dict[str, object]] = []
     for feature in features.columns:
         values = features[feature]
+        # 문자열 범주형에 수치형 median·SMD를 적용하지 않는다.
+        if not pd.api.types.is_numeric_dtype(values):
+            continue
         fn_values = values[error_groups == "FN"]
         fp_values = values[error_groups == "FP"]
         tn_values = values[error_groups == "TN"]
@@ -145,7 +150,11 @@ def compare_error_features(
                 ),
             }
         )
-    result = pd.DataFrame(rows)
+    result = pd.DataFrame(rows, columns=[
+        "feature", "fn_missing_ratio", "tn_missing_ratio", "fn_vs_tn_missing_ratio_delta",
+        "fn_median", "tn_median", "fn_vs_tn_standardized_mean_difference",
+        "fp_missing_ratio", "fp_vs_tn_standardized_mean_difference",
+    ])
 
     if drift_report is not None:
         required_columns = {"feature", "drift_priority", "drift_priority_score"}
@@ -180,6 +189,7 @@ def analyze_time_validation_errors(
     drift_report: pd.DataFrame | None = None,
     n_jobs: int = 1,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    validate_split_pair(train_frame, validation_frame, config.dataset, temporal=True)
     train_x, train_y, feature_columns = split_frame_to_xy(train_frame, config.dataset)
     validation_x, validation_y, _ = split_frame_to_xy(
         validation_frame,
@@ -211,6 +221,7 @@ def analyze_time_validation_errors(
     cases = pd.DataFrame(
         {
             "source_row_index": validation_frame.index,
+            "source_row_id": validation_frame[SOURCE_ROW_ID].to_numpy() if SOURCE_ROW_ID in validation_frame else None,
             "label": validation_y.to_numpy(),
             "positive_score": positive_scores,
             "threshold": threshold,

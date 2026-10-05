@@ -16,21 +16,22 @@ import pandas as pd
 from lightgbm import LGBMClassifier
 from sklearn.base import clone
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import RepeatedStratifiedKFold
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
 try:
     from src.modeling_config import DEFAULT_CONFIG_PATH, ModelingConfig, load_modeling_config
     from src.modeling_metrics import evaluate_binary_scores
     from src.step4_baseline import split_frame_to_xy
+    from src.modeling_preprocessing import preprocessing_steps
+    from src.split_contract import PROTOCOL_ID, validate_train_role, training_folds
 except ModuleNotFoundError:
     from modeling_config import DEFAULT_CONFIG_PATH, ModelingConfig, load_modeling_config
     from modeling_metrics import evaluate_binary_scores
     from step4_baseline import split_frame_to_xy
+    from modeling_preprocessing import preprocessing_steps
+    from split_contract import PROTOCOL_ID, validate_train_role, training_folds
 
 
 # ==========================================
@@ -44,30 +45,27 @@ def build_candidate_pipelines(config: ModelingConfig) -> dict[str, Pipeline]:
     return {
         # L1은 희소 feature 선택 효과와 선형 기준 성능을 함께 확인한다.
         "logistic_regression_l1": Pipeline([
-            ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", StandardScaler()),
+            *preprocessing_steps(config.dataset, scale=True),
             ("model", LogisticRegression(penalty="l1", solver="liblinear", max_iter=2000, random_state=seed)),
         ]),
         "logistic_regression_l1_balanced": Pipeline([
-            ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", StandardScaler()),
+            *preprocessing_steps(config.dataset, scale=True),
             ("model", LogisticRegression(penalty="l1", solver="liblinear", class_weight="balanced", max_iter=2000, random_state=seed)),
         ]),
         "rbf_svm": Pipeline([
-            ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", StandardScaler()),
+            *preprocessing_steps(config.dataset, scale=True),
             ("model", SVC(kernel="rbf", probability=True, random_state=seed)),
         ]),
         "random_forest": Pipeline([
-            ("imputer", SimpleImputer(strategy="median")),
+            *preprocessing_steps(config.dataset),
             ("model", RandomForestClassifier(n_estimators=300, random_state=seed, n_jobs=1)),
         ]),
         "lightgbm": Pipeline([
-            ("imputer", SimpleImputer(strategy="median")),
+            *preprocessing_steps(config.dataset),
             ("model", LGBMClassifier(n_estimators=300, random_state=seed, n_jobs=1, verbosity=-1)),
         ]),
         "lightgbm_scale_pos_weight": Pipeline([
-            ("imputer", SimpleImputer(strategy="median")),
+            *preprocessing_steps(config.dataset),
             ("model", LGBMClassifier(n_estimators=300, random_state=seed, n_jobs=1, verbosity=-1)),
         ]),
     }
@@ -79,6 +77,7 @@ def build_candidate_pipelines(config: ModelingConfig) -> dict[str, Pipeline]:
 # - Test 및 외부 Validation의 정보는 모델 선택 과정에 사용하지 않음
 # ==========================================
 def compare_candidates(train_frame: pd.DataFrame, config: ModelingConfig) -> pd.DataFrame:
+    validate_train_role(train_frame)
     train_x, train_y, _ = split_frame_to_xy(train_frame, config.dataset)
     # 계층 CV와 모든 분류 모델은 정상·Fail label이 모두 있어야 학습할 수 있다.
     if train_y.nunique() < 2:
@@ -90,11 +89,6 @@ def compare_candidates(train_frame: pd.DataFrame, config: ModelingConfig) -> pd.
             "가장 적은 class의 샘플 수가 CV fold 수보다 작습니다: "
             f"최소 class 샘플={smallest_class_count}, fold={config.experiment.cv.n_splits}"
         )
-    splitter = RepeatedStratifiedKFold(
-        n_splits=config.experiment.cv.n_splits,
-        n_repeats=config.experiment.cv.n_repeats,
-        random_state=config.experiment.cv.random_state,
-    )
     records: list[dict[str, object]] = []
 
     for model_name, pipeline in build_candidate_pipelines(config).items():
@@ -103,7 +97,7 @@ def compare_candidates(train_frame: pd.DataFrame, config: ModelingConfig) -> pd.
             continue
         fold_metrics: list[dict[str, float]] = []
         fit_times: list[float] = []
-        for fold_number, (fit_index, valid_index) in enumerate(splitter.split(train_x, train_y), start=1):
+        for fit_index, valid_index in training_folds(train_x, train_y, train_frame, config):
             model = clone(pipeline)
             # LightGBM의 불량 가중치는 현재 CV 학습 fold의 class 수로만 계산한다.
             if model_name == "lightgbm_scale_pos_weight":
@@ -127,7 +121,8 @@ def compare_candidates(train_frame: pd.DataFrame, config: ModelingConfig) -> pd.
 
         record: dict[str, object] = {
             "dataset_id": config.dataset.dataset_id,
-            "split_strategy": "random_cv",
+            "split_strategy": "time_train_cv" if PROTOCOL_ID in train_frame and str(train_frame[PROTOCOL_ID].iloc[0]).startswith("time:") else "random_cv",
+            "training_protocol_id": train_frame[PROTOCOL_ID].iloc[0] if PROTOCOL_ID in train_frame else None,
             "train_samples": len(train_frame),
             "model_name": model_name,
             "n_splits": config.experiment.cv.n_splits,
@@ -141,6 +136,8 @@ def compare_candidates(train_frame: pd.DataFrame, config: ModelingConfig) -> pd.
             record[f"{metric_name}_mean"] = float(np.mean(values)) if values else None
             record[f"{metric_name}_std"] = float(np.std(values)) if values else None
         records.append(record)
+    if not records:
+        raise ValueError("models.candidates에 지원하는 후보 모델이 없습니다.")
     return pd.DataFrame(records).sort_values("average_precision_mean", ascending=False).reset_index(drop=True)
 
 

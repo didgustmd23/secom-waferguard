@@ -1,6 +1,6 @@
 # ==========================================
 # LightGBM 후보의 OOF 확률과 threshold별 지표 비교
-# - Random Train 내부의 Repeated Stratified K-Fold로만 OOF 확률을 생성한다.
+# - 시간 holdout을 먼저 제외한 Time Train 내부에서만 OOF 확률을 생성한다.
 # - Time Validation과 Test split은 읽거나 threshold 결정에 사용하지 않는다.
 # - 이 파일은 후보별 trade-off를 기록할 뿐, 최종 threshold를 자동 확정하지 않는다.
 # ==========================================
@@ -15,18 +15,19 @@ from time import perf_counter
 import numpy as np
 import pandas as pd
 from sklearn.base import clone
-from sklearn.model_selection import RepeatedStratifiedKFold
 
 try:
     from src.modeling_config import DEFAULT_CONFIG_PATH, ModelingConfig, load_modeling_config
     from src.modeling_metrics import evaluate_binary_scores
     from src.step4_baseline import split_frame_to_xy
     from src.step6_feature_compare import build_experiments
+    from src.split_contract import SOURCE_ROW_ID, PROTOCOL_ID, validate_train_role, training_folds
 except ModuleNotFoundError:
     from modeling_config import DEFAULT_CONFIG_PATH, ModelingConfig, load_modeling_config
     from modeling_metrics import evaluate_binary_scores
     from step4_baseline import split_frame_to_xy
     from step6_feature_compare import build_experiments
+    from split_contract import SOURCE_ROW_ID, PROTOCOL_ID, validate_train_role, training_folds
 
 
 EXPERIMENT_NAME = "lightgbm_all"
@@ -35,7 +36,8 @@ EXPERIMENT_NAME = "lightgbm_all"
 # ==========================================
 # OOF 평균 확률 생성
 # - 한 repeat에서 각 샘플은 정확히 한 번 validation fold에 속한다.
-# - repeats만큼 얻은 validation 확률을 평균내어 안정적인 OOF 확률로 사용한다.
+# - repeats만큼 얻은 validation 확률을 평균내어 OOF 비교 확률로 사용한다.
+# - 이 평균과 최종 단일 재학습 모델의 확률 척도는 같다고 보장하지 않는다.
 # ==========================================
 def generate_oof_scores(
     train_frame: pd.DataFrame,
@@ -43,24 +45,20 @@ def generate_oof_scores(
     *,
     n_jobs: int = 1,
 ) -> tuple[pd.DataFrame, float]:
+    validate_train_role(train_frame)
     features, labels, _ = split_frame_to_xy(train_frame, config.dataset)
     if labels.nunique() < 2:
-        raise ValueError("OOF를 생성하려면 Random Train에 정상과 Fail label이 모두 있어야 합니다.")
+        raise ValueError("OOF를 생성하려면 Train에 정상과 Fail label이 모두 있어야 합니다.")
 
     experiments = build_experiments(config, n_jobs=n_jobs)
     if EXPERIMENT_NAME not in experiments:
         raise ValueError(f"OOF 대상 후보가 정의되어 있지 않습니다: {EXPERIMENT_NAME}")
 
-    cv = RepeatedStratifiedKFold(
-        n_splits=config.experiment.cv.n_splits,
-        n_repeats=config.experiment.cv.n_repeats,
-        random_state=config.experiment.cv.random_state,
-    )
     score_sum = np.zeros(len(train_frame), dtype=float)
     prediction_count = np.zeros(len(train_frame), dtype=int)
     started_at = perf_counter()
 
-    for fit_indices, validation_indices in cv.split(features, labels):
+    for fit_indices, validation_indices in training_folds(features, labels, train_frame, config):
         # fold별 Pipeline을 새로 만들어 imputing과 model fit이 validation에 닿지 않게 한다.
         pipeline = clone(experiments[EXPERIMENT_NAME])
         pipeline.fit(features.iloc[fit_indices], labels.iloc[fit_indices])
@@ -82,17 +80,19 @@ def generate_oof_scores(
     expected_count = config.experiment.cv.n_repeats
     if not np.all(prediction_count == expected_count):
         raise RuntimeError(
-            "모든 Random Train 샘플의 OOF 예측 횟수가 반복 횟수와 일치하지 않습니다. "
+            "모든 Train 샘플의 OOF 예측 횟수가 반복 횟수와 일치하지 않습니다. "
             f"기대값={expected_count}, 실제 범위={prediction_count.min()}~{prediction_count.max()}"
         )
 
-    # 원본 행 번호를 함께 남겨 이후 FN/FP 사례 분석 시 원본 split과 다시 연결할 수 있게 한다.
+    # split 파일의 행 위치와 원본 ID를 구분한다. 기존 CSV의 원본 ID는 알 수 없다.
     oof_frame = pd.DataFrame(
         {
             "source_row_index": train_frame.index,
+            "source_row_id": train_frame[SOURCE_ROW_ID].to_numpy() if SOURCE_ROW_ID in train_frame else None,
             "label": labels.to_numpy(),
             "oof_positive_score": score_sum / prediction_count,
             "oof_prediction_count": prediction_count,
+            "training_protocol_id": train_frame[PROTOCOL_ID].iloc[0] if PROTOCOL_ID in train_frame else None,
         }
     )
     return oof_frame, elapsed_seconds
@@ -138,7 +138,8 @@ def compare_thresholds(
         rows.append(
             {
                 "dataset_id": config.dataset.dataset_id,
-                "split_strategy": "random_train_oof",
+                "split_strategy": "time_train_oof" if "training_protocol_id" in oof_frame and str(oof_frame["training_protocol_id"].iloc[0]).startswith("time:") else "legacy_train_oof",
+                "training_protocol_id": oof_frame["training_protocol_id"].iloc[0] if "training_protocol_id" in oof_frame else None,
                 "experiment": EXPERIMENT_NAME,
                 **asdict(metrics),
             }
@@ -148,7 +149,7 @@ def compare_thresholds(
 
 
 # ==========================================
-# Random Train 파일에서 OOF·threshold 비교 결과를 저장
+# Train 파일에서 OOF·threshold 비교 결과를 저장
 # - OOF 결과와 threshold 표를 별도 파일로 저장해 재현성과 오류 분석을 지원한다.
 # - Test 경로 인자는 제공하지 않아 봉인된 Test 사용을 막는다.
 # ==========================================
@@ -179,7 +180,7 @@ def run_threshold_oof_from_file(
 
 
 def _parse_arguments() -> argparse.Namespace:
-    # OOF 생성은 Random Train만 입력으로 받아 Test 사용을 구조적으로 막는다.
+    # 새 평가 경로에서는 integrated/time_train.csv만 입력한다.
     parser = argparse.ArgumentParser(description="LightGBM OOF threshold 비교")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--train", type=Path, required=True)

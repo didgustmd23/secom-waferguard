@@ -14,8 +14,10 @@ import pandas as pd
 # `python -m src...` 실행과 `python src/<script>.py` 직접 실행을 모두 지원한다.
 try:
     from src.modeling_config import DatasetSpec
+    from src.split_contract import SPLIT_METADATA
 except ModuleNotFoundError:
     from modeling_config import DatasetSpec
+    from split_contract import SPLIT_METADATA
 
 
 # ==========================================
@@ -46,7 +48,7 @@ def resolve_feature_columns(
         raise ValueError(f"데이터셋에 필수 column이 없습니다: {missing_columns}")
 
     # 모델 입력에서 제외할 역할 컬럼을 먼저 구성한다.
-    non_feature_columns = set(required_columns)
+    non_feature_columns = set(required_columns) | set(SPLIT_METADATA)
 
     # Profile이 지정한 방식으로 feature 후보를 일관되게 선택
     if dataset.feature_selection_mode == "prefix":
