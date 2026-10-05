@@ -26,7 +26,7 @@ except ImportError:
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "data"
-SPLIT_DIR = DATA_DIR / "split"
+SPLIT_DIR = DATA_DIR / "splits"
 LOG_DIR = PROJECT_ROOT / "logs"
 FIGURE_DIR = LOG_DIR / "figures"
 
