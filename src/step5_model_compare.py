@@ -78,6 +78,11 @@ def build_candidate_pipelines(config: ModelingConfig) -> dict[str, Pipeline]:
 # ==========================================
 def compare_candidates(train_frame: pd.DataFrame, config: ModelingConfig) -> pd.DataFrame:
     validate_train_role(train_frame)
+    # 직접 생성한 설정도 파일 로더와 동일하게 후보 이름을 검사한다.
+    supported = {"logistic_regression_l1", "rbf_svm", "random_forest", "lightgbm"}
+    unknown = sorted(set(config.candidate_models) - supported)
+    if unknown:
+        raise ValueError(f"지원하지 않는 후보 모델입니다: {unknown}")
     train_x, train_y, _ = split_frame_to_xy(train_frame, config.dataset)
     # 계층 CV와 모든 분류 모델은 정상·Fail label이 모두 있어야 학습할 수 있다.
     if train_y.nunique() < 2:

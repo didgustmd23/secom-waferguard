@@ -75,10 +75,20 @@ class GenericPreprocessingTest(unittest.TestCase):
         })
         config = replace(self.config, experiment=replace(self.config.experiment,
                                                         cv=CrossValidationConfig(2, 2, 42)))
-        scores, _ = generate_oof_scores(frame, config)
+        scores, _ = generate_oof_scores(frame, config, score_method="repeated_mean")
         self.assertEqual(scores.oof_prediction_count.tolist(), [2] * len(frame))
         self.assertEqual(scores.source_row_id.tolist(), list(range(100, 112)))
         self.assertTrue(scores.oof_positive_score.between(0, 1).all())
+        self.assertEqual(set(scores.threshold_use), {"analysis_only"})
+
+    def test_default_oof_uses_one_prediction_per_row(self):
+        # 후보 비교 설정이 반복 CV여도 threshold OOF는 단일 K-fold를 사용한다.
+        config = replace(self.config, experiment=replace(self.config.experiment,
+                                                        cv=CrossValidationConfig(2, 2, 42)))
+        scores, _ = generate_oof_scores(self._frame(), config)
+        self.assertEqual(scores.oof_prediction_count.tolist(), [1] * len(scores))
+        self.assertEqual(set(scores.oof_score_method), {"single"})
+        self.assertEqual(set(scores.threshold_use), {"candidate"})
 
 
 if __name__ == "__main__":

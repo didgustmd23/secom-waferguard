@@ -433,8 +433,10 @@ def load_modeling_config(config_path: Path | str = DEFAULT_CONFIG_PATH) -> Model
     # 실험 수치의 허용 범위를 검증
     if not 0.0 < default_threshold < 1.0:
         raise ValueError("experiment.default_threshold는 0 초과 1 미만이어야 합니다")
-    if not 0.0 < pca_explained_variance <= 1.0:
-        raise ValueError("experiment.pca_explained_variance는 0 초과 1 이하여야 합니다")
+    if not 0.0 < pca_explained_variance < 1.0:
+        raise ValueError("experiment.pca_explained_variance는 0 초과 1 미만이어야 합니다")
+    if not 0 <= random_state < 2**32:
+        raise ValueError("experiment.random_state는 0 이상 2**32 미만이어야 합니다")
     if n_splits < 2 or n_repeats < 1:
         raise ValueError("cross_validation은 n_splits >= 2 및 n_repeats >= 1이어야 합니다")
 
@@ -447,6 +449,13 @@ def load_modeling_config(config_path: Path | str = DEFAULT_CONFIG_PATH) -> Model
         raise ValueError("models.baseline은 비어 있으면 안 됩니다")
     if not candidate_models or not all(isinstance(model, str) for model in candidate_models):
         raise ValueError("models.candidates에는 모델 이름이 하나 이상 있어야 합니다")
+    # 이름 오타가 후보를 조용히 제외하거나 빈 결과의 KeyError로 이어지지 않게 차단한다.
+    supported_models = {"logistic_regression_l1", "rbf_svm", "random_forest", "lightgbm"}
+    unknown_models = sorted(set(candidate_models) - supported_models)
+    if unknown_models:
+        raise ValueError(f"models.candidates에 지원하지 않는 모델이 있습니다: {unknown_models}")
+    if baseline_model != "logistic_regression":
+        raise ValueError("models.baseline은 logistic_regression만 지원합니다")
     if not top_k_feature_counts or not all(
         isinstance(count, int) and not isinstance(count, bool) and count > 0
         for count in top_k_feature_counts
