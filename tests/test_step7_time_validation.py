@@ -61,7 +61,7 @@ class TimeValidationComparisonTest(unittest.TestCase):
                 experiment_names=("unknown_model",),
             )
 
-    def test_uses_the_preselected_threshold_without_retuning(self) -> None:
+    def test_uses_preselected_threshold_without_retuning(self) -> None:
         result = compare_time_validation(
             self.train_frame,
             self.validation_frame,

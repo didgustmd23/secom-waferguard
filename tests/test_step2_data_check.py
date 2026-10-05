@@ -30,7 +30,7 @@ class Step2DataCheckTest(unittest.TestCase):
         drop_zero_variance=True,
     )
 
-    def test_records_eda_candidates_without_returning_cleaned_data(self) -> None:
+    def test_records_eda_candidates_without_cleaned_data(self) -> None:
         # 결측률 초과·상수 feature·잘못된 timestamp를 하나의 작은 입력에 구성한다.
         dataframe = pd.DataFrame(
             {

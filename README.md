@@ -13,7 +13,7 @@
 | 범용 설정 코어 | 완료 | `config.json`과 Dataset Profile을 분리해 로드·검증 |
 | 데이터 구조 검증 | 완료 | Profile 기준 label·metadata·feature 컬럼 검증 |
 | 공통 평가 | 완료 | Profile label 기반 Recall, AP, Precision, F1, ROC-AUC 계산 |
-| 자동 테스트 | 완료 | 설정·schema·평가·병합·품질 점검·OOF threshold 비교 26개 테스트 |
+| 자동 테스트 | 완료 | 설정·schema·평가·병합·품질 점검·후보 모델·특징 선택·OOF threshold 비교 38개 테스트 |
 | 데이터 병합·품질 점검 | 완료 | Profile 기반 canonical 병합과 재생성 가능한 품질 로그 |
 | Random / Time split | 완료 | 70/15/15 split 생성. `step3_split.py`의 재현성·시간 경계 그룹 처리는 검토·보완 중 |
 | Baseline | 완료 | Train/Validation 기반 Logistic Regression 평가 및 공통 지표 기록 |

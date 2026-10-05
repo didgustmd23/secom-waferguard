@@ -32,7 +32,7 @@ class ModelingConfigTest(unittest.TestCase):
         )
 
     # Dataset Profile에서 필수 positive Label이 빠지면 즉시 오류가 나는지 확인
-    def test_dataset_profile_rejects_missing_positive_label(self) -> None:
+    def test_profile_rejects_missing_positive_label(self) -> None:
         profile_path = Path("configs/datasets/secom.json")
         profile = json.loads(profile_path.read_text(encoding="utf-8"))
         del profile["labels"]["positive"]

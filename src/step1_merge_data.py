@@ -170,6 +170,7 @@ def merge_dataset(config_path: Path | str, output_path: Path | None = None) -> P
 # - --output으로 canonical merged CSV의 저장 위치를 일시적으로 변경
 # ==========================================
 def parse_arguments() -> argparse.Namespace:
+    # 기본 설정은 유지하되, 재현 실험에서 설정·출력 경로만 교체할 수 있게 한다.
     parser = argparse.ArgumentParser(description="Dataset Profile 기반 원본 데이터 병합")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--output", type=Path)

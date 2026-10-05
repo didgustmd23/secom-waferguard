@@ -41,6 +41,7 @@ PRESELECTED_EXPERIMENTS = (
 # - L1 selector는 Train 데이터에서 선택된 support 개수만 기록한다.
 # ==========================================
 def _selected_feature_count(model, input_feature_count: int) -> int:
+    # selector가 없는 모델은 입력 feature 전체를 사용한 것으로 기록한다.
     if "selector" not in model.named_steps:
         return input_feature_count
 
@@ -154,6 +155,7 @@ def compare_time_validation_from_files(
     threshold: float | None = None,
     n_jobs: int = 1,
 ) -> pd.DataFrame:
+    # 파일을 읽는 경계에서만 I/O를 수행하고, 실제 평가는 순수 함수에 위임한다.
     config = load_modeling_config(config_path)
     result = compare_time_validation(
         pd.read_csv(train_path),
@@ -171,6 +173,7 @@ def compare_time_validation_from_files(
 
 
 def _parse_arguments() -> argparse.Namespace:
+    # Test 경로 인자를 제공하지 않아 CLI 단계에서 Test 오용을 막는다.
     parser = argparse.ArgumentParser(description="사전 선택 모델의 Time Validation 비교")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--train", type=Path, required=True)
@@ -204,6 +207,7 @@ def _parse_arguments() -> argparse.Namespace:
 
 
 def main() -> None:
+    # OOF에서 정한 threshold를 그대로 전달해 Time Validation 결과만 출력한다.
     arguments = _parse_arguments()
     result = compare_time_validation_from_files(
         arguments.config,

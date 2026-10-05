@@ -38,7 +38,7 @@ class BaselineTest(unittest.TestCase):
     numeric_config = replace(MODELING_CONFIG, dataset=numeric_dataset)
 
     # 결측 수치형 feature를 포함한 Train/Validation split으로 기본 Pipeline을 검증한다.
-    def test_runs_numeric_baseline_and_writes_one_row_result(self) -> None:
+    def test_runs_numeric_baseline_and_writes_result(self) -> None:
         train_frame = pd.DataFrame(
             {
                 "sensor_a": [0.0, 0.2, 0.1, 0.9, 1.0, 0.8],

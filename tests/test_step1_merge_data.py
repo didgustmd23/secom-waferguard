@@ -32,7 +32,7 @@ class Step1MergeDataTest(unittest.TestCase):
             drop_zero_variance=True,
         )
 
-    def test_merges_profile_defined_metadata_and_sensor_columns(self) -> None:
+    def test_merges_profile_metadata_and_sensor_columns(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             # 테스트 전용 원본 파일을 만들어 실제 파일 I/O 병합 경로를 검증한다.
             temporary_path = Path(temporary_directory)

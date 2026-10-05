@@ -40,6 +40,7 @@ def assign_error_groups(
     positive_label: object,
     threshold: float,
 ) -> pd.Series:
+    # threshold 검증을 먼저 수행해 잘못된 분류 그룹을 만들지 않는다.
     if not 0.0 <= threshold <= 1.0:
         raise ValueError("오류 분석 threshold는 0.0 이상 1.0 이하여야 합니다.")
     if len(labels) != len(positive_scores):
@@ -65,6 +66,7 @@ def assign_error_groups(
 # - FP는 표본 수가 작을 수 있으므로 절대값을 과도하게 해석하지 않는다.
 # ==========================================
 def _standardized_mean_difference(left: pd.Series, right: pd.Series) -> float:
+    # 결측값은 제외하고 두 그룹의 평균 차이를 공통 표준편차로 나눈다.
     left_values = left.dropna().to_numpy(dtype=float)
     right_values = right.dropna().to_numpy(dtype=float)
     if len(left_values) < 2 or len(right_values) < 2:
@@ -85,6 +87,7 @@ def summarize_error_groups(
     cases: pd.DataFrame,
     features: pd.DataFrame,
 ) -> pd.DataFrame:
+    # 사례와 feature 행이 어긋나면 결측률 요약이 잘못되므로 먼저 차단한다.
     if len(cases) != len(features):
         raise ValueError("오류 사례와 feature 행 수가 일치해야 합니다.")
 
@@ -239,6 +242,7 @@ def analyze_time_validation_errors_from_files(
     drift_report_path: Path | str | None = None,
     n_jobs: int = 1,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    # drift report는 선택 입력이며, 전달된 경우에만 feature 비교 결과와 결합한다.
     drift_report = None
     if drift_report_path is not None:
         path = Path(drift_report_path)
@@ -266,6 +270,7 @@ def analyze_time_validation_errors_from_files(
 
 
 def _parse_arguments() -> argparse.Namespace:
+    # threshold는 필수 인자로 받아 Time Validation에서 임의 탐색하지 않게 한다.
     parser = argparse.ArgumentParser(description="Time Validation FN/FP 사례 분석")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--train", type=Path, required=True)
@@ -288,6 +293,7 @@ def _parse_arguments() -> argparse.Namespace:
 
 
 def main() -> None:
+    # 사례·요약·feature 비교 로그를 저장하고 콘솔에는 검토용 요약만 표시한다.
     arguments = _parse_arguments()
     _, summary, features = analyze_time_validation_errors_from_files(
         arguments.config,

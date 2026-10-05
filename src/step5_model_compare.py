@@ -39,8 +39,10 @@ except ModuleNotFoundError:
 # - 모든 Pipeline은 CV fold의 train index에서만 fit됨
 # ==========================================
 def build_candidate_pipelines(config: ModelingConfig) -> dict[str, Pipeline]:
+    # 모든 후보에 같은 난수 시드를 사용해 성능 차이가 모델 조건에서만 나도록 한다.
     seed = config.experiment.cv.random_state
     return {
+        # L1은 희소 feature 선택 효과와 선형 기준 성능을 함께 확인한다.
         "logistic_regression_l1": Pipeline([
             ("imputer", SimpleImputer(strategy="median")),
             ("scaler", StandardScaler()),
@@ -78,6 +80,16 @@ def build_candidate_pipelines(config: ModelingConfig) -> dict[str, Pipeline]:
 # ==========================================
 def compare_candidates(train_frame: pd.DataFrame, config: ModelingConfig) -> pd.DataFrame:
     train_x, train_y, _ = split_frame_to_xy(train_frame, config.dataset)
+    # 계층 CV와 모든 분류 모델은 정상·Fail label이 모두 있어야 학습할 수 있다.
+    if train_y.nunique() < 2:
+        raise ValueError("후보 모델 비교를 위해 Train split에는 정상과 Fail label이 모두 있어야 합니다.")
+    # 각 fold validation에 두 class가 포함되도록 가장 적은 class 수를 먼저 확인한다.
+    smallest_class_count = int(train_y.value_counts().min())
+    if smallest_class_count < config.experiment.cv.n_splits:
+        raise ValueError(
+            "가장 적은 class의 샘플 수가 CV fold 수보다 작습니다: "
+            f"최소 class 샘플={smallest_class_count}, fold={config.experiment.cv.n_splits}"
+        )
     splitter = RepeatedStratifiedKFold(
         n_splits=config.experiment.cv.n_splits,
         n_repeats=config.experiment.cv.n_repeats,
@@ -133,6 +145,7 @@ def compare_candidates(train_frame: pd.DataFrame, config: ModelingConfig) -> pd.
 
 
 def main() -> None:
+    # Train 파일만 받아 후보 비교 결과를 재생성 가능한 CSV로 기록한다.
     parser = argparse.ArgumentParser(description="반복 계층 CV 후보 모델 비교")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--train", type=Path, required=True)

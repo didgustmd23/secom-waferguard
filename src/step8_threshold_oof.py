@@ -160,6 +160,7 @@ def run_threshold_oof_from_file(
     *,
     n_jobs: int = 1,
 ) -> tuple[pd.DataFrame, pd.DataFrame, float]:
+    # OOF 원본과 threshold 비교표를 분리 저장해 이후 오류 사례 분석에 재사용한다.
     config = load_modeling_config(config_path)
     oof_frame, elapsed_seconds = generate_oof_scores(
         pd.read_csv(train_path), config, n_jobs=n_jobs
@@ -178,6 +179,7 @@ def run_threshold_oof_from_file(
 
 
 def _parse_arguments() -> argparse.Namespace:
+    # OOF 생성은 Random Train만 입력으로 받아 Test 사용을 구조적으로 막는다.
     parser = argparse.ArgumentParser(description="LightGBM OOF threshold 비교")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--train", type=Path, required=True)
