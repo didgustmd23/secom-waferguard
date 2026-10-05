@@ -63,6 +63,7 @@ class BaselineTest(unittest.TestCase):
         self.assertEqual(result.feature_count, 2)
         self.assertEqual(result.metrics.positive_support, 2)
         self.assertGreaterEqual(result.training_seconds, 0.0)
+        self.assertIsNone(result.split_strategy)
 
         # 결과 CSV는 임시 위치에 한 행만 기록해 실제 logs/를 오염시키지 않는다.
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -73,6 +74,8 @@ class BaselineTest(unittest.TestCase):
         self.assertEqual(len(written_result), 1)
         self.assertIn("average_precision", written_result.columns)
         self.assertIn("training_seconds", written_result.columns)
+        self.assertIn("split_strategy", written_result.columns)
+        self.assertIn("train_path", written_result.columns)
 
     # 선언된 범주형 feature는 unseen category가 Validation에 있어도 one-hot encoder가 처리해야 한다.
     def test_runs_profile_defined_categorical_feature(self) -> None:

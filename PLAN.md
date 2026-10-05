@@ -100,8 +100,8 @@ Model freeze → Final test (once) → Model bundle
 
 ### B — 양현승 (모델링·평가)
 
-- [ ] `SimpleImputer(median) → StandardScaler → LogisticRegression` baseline 구현
-- [ ] Recall, AP, Precision, F1, ROC-AUC, 학습 시간을 기록
+- [x] `SimpleImputer(median) → StandardScaler → LogisticRegression` baseline 구현
+- [x] Recall, AP, Precision, F1, ROC-AUC, 학습 시간을 기록
 
 ### 공동
 
@@ -121,12 +121,12 @@ Model freeze → Final test (once) → Model bundle
 
 ### B — 양현승 (모델링·평가)
 
-- [ ] PCA(누적 설명 분산 90%) 실험
-- [ ] L1 Logistic Regression 기반 특징 선택
-- [ ] Random Forest/LightGBM Feature Importance 기반 Top-K 비교 (100/50/30/20/10)
-- [ ] Logistic Regression, SVM, Random Forest, LightGBM 비교
-- [ ] `class_weight` 또는 `scale_pos_weight` 적용 비교
-- [ ] Repeated Stratified K-Fold로 평균 ± 표준편차 기록
+- [x] PCA(누적 설명 분산 90%) 실험
+- [x] L1 Logistic Regression 기반 특징 선택
+- [x] Random Forest/LightGBM Feature Importance 기반 Top-K 비교 (100/50/30/20/10)
+- [x] Logistic Regression, SVM, Random Forest, LightGBM 비교
+- [x] `class_weight` 또는 `scale_pos_weight` 적용 비교
+- [x] Repeated Stratified K-Fold로 평균 ± 표준편차 기록
 
 ### 공동
 
@@ -146,10 +146,25 @@ Model freeze → Final test (once) → Model bundle
 
 ### B — 양현승 (모델링·평가)
 
-- [ ] OOF prediction 생성
-- [ ] Threshold별 Recall, Precision, FN, FP 비교
+- [x] OOF prediction 생성
+- [x] Threshold별 Recall, Precision, FN, FP 비교
 - [ ] FN/FP trade-off를 바탕으로 최종 threshold 결정
 - [ ] Isolation Forest와 PCA reconstruction error를 보조 실험으로 비교
+
+#### Threshold 결정 기준 및 현재 프로젝트 후보
+
+- Threshold는 후보 모델을 고정한 뒤 `random_train` 내부의 Repeated Stratified K-Fold OOF 확률로만 비교한다. Time Validation과 Test는 threshold 탐색에 사용하지 않는다.
+  - **이유:** Time Validation은 시간 순서 일반화 확인용이고, Test는 최종 성능 확인용이다. 두 데이터를 threshold에 맞추면 평가 데이터에 과적합될 수 있다.
+- 후보 모델은 Random CV와 Time Validation 결과를 함께 검토해 `lightgbm_all`로 잠정 고정한다. `l1_balanced_l1_select`는 Time Validation AP가 더 낮아 최종 후보에서 우선 제외한다.
+  - **이유:** LightGBM 전체 특성 모델은 Random CV와 Time Validation에서 모두 L1 선택 모델보다 높은 AP를 보였다.
+- 프로젝트의 재현 가능한 threshold 후보는 OOF F1이 가장 높은 `0.000475`로 기록한다. 해당 OOF 결과는 Recall `0.329`, Precision `0.218`, F1 `0.262`, FN `49`, FP `86`이다.
+  - **이유:** 현재 데이터에는 현장의 재검사 처리 용량, Lot hold 비용, 불량 유출 비용이 없으므로 임의의 현장 비용을 가정하지 않는다. 따라서 OOF F1 최대 지점을 비교 기준 후보로 사용한다.
+- `0.000475`는 현장 자동 폐기 또는 Lot hold 기준이 아니라 프로젝트 평가용 후보값이다. 실제 현장 적용 시에는 허용 가능한 재검사 건수, FP 비용, FN 비용을 정의하고 그 제약 아래에서 다시 결정한다.
+  - **이유:** 반도체 공정의 FP 허용 수준은 검사 위치와 후속 조치에 따라 달라 단일 비율로 일반화할 수 없다.
+- 후보 threshold를 정한 뒤에는 같은 값을 Time Validation에 그대로 적용해 시간 구간의 FN·FP를 확인한다. Time Validation 결과를 보고 threshold를 다시 조정하지 않는다.
+  - **이유:** 시간 데이터로 threshold를 재조정하면 시간 검증이 또 다른 튜닝 데이터가 되어 일반화 성능을 과대평가할 수 있다.
+- 모델·특성 집합·threshold를 모두 고정한 뒤에만 Test를 한 번 평가한다.
+  - **이유:** Test set을 최종 확인용으로 보존해 성능 추정의 낙관 편향을 막는다.
 
 ### 공동
 

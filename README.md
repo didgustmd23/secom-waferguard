@@ -13,9 +13,16 @@
 | 범용 설정 코어 | 완료 | `config.json`과 Dataset Profile을 분리해 로드·검증 |
 | 데이터 구조 검증 | 완료 | Profile 기준 label·metadata·feature 컬럼 검증 |
 | 공통 평가 | 완료 | Profile label 기반 Recall, AP, Precision, F1, ROC-AUC 계산 |
-| 자동 테스트 | 완료 | 설정·schema·평가·병합·품질 점검 16개 테스트 |
+| 자동 테스트 | 완료 | 설정·schema·평가·병합·품질 점검·OOF threshold 비교 26개 테스트 |
 | 데이터 병합·품질 점검 | 완료 | Profile 기반 canonical 병합과 재생성 가능한 품질 로그 |
-| split·baseline·후속 모델링 | 예정 | Day 2~5 계획에 따라 구현 |
+| Random / Time split | 완료 | 70/15/15 split 생성. `step3_split.py`의 재현성·시간 경계 그룹 처리는 검토·보완 중 |
+| Baseline | 완료 | Train/Validation 기반 Logistic Regression 평가 및 공통 지표 기록 |
+| 후보 모델·불균형 비교 | 완료 | L1 Logistic Regression, RBF SVM, Random Forest, LightGBM, class weight 비교 |
+| 특징 선택 비교 | 완료 | PCA 90%, L1 선택, LightGBM Top-K(100/50/30/20/10)를 CV 학습 fold 내부에서 비교 |
+| 시간 변화 진단 | 완료 | Time Train/Validation drift 우선순위: 높음 242개, 중간 102개, 낮음 246개 |
+| Time Validation | 완료 | LightGBM 전체 특성 및 L1 선택 후보의 시간 구간 일반화 성능 확인 |
+| OOF threshold 비교 | 완료 | LightGBM 전체 특성의 OOF 확률과 threshold별 Recall·Precision·FN·FP 기록 |
+| 최종 Test·모델 배포 | 미완료 | Time Validation 성능 개선·모델 재선정 후 Test 1회 평가, Pipeline 저장·Model Card·예측 CLI 구현 예정 |
 
 ## 프로젝트 목표
 
@@ -68,8 +75,8 @@ Final test and model bundle
 
 ### 데이터 전처리
 
-- 센서별 결측률을 점검하고, 결측률이 50%를 초과하는 센서를 제거합니다.
-- 상수(Zero-variance) 센서를 제거합니다.
+- 센서별 결측률과 상수(Zero-variance) 센서를 점검해 EDA 후보로 기록합니다.
+- 전체 데이터에서 센서를 전역 제거하지 않습니다. 실제 제거·선택은 Train/CV 학습 fold 내부에서만 수행합니다.
 - 나머지 결측값은 `SimpleImputer(strategy="median")`로 처리합니다.
 - Imputation, scaling, 특징 선택은 학습 데이터에만 fit되도록 `scikit-learn Pipeline` 안에서 수행합니다.
 
@@ -87,6 +94,20 @@ Final test and model bundle
 
 최종 분류 임계값은 Out-of-Fold 예측에서 Recall, Precision, False Negative, False Positive의 trade-off를 비교하여 결정합니다.
 
+### 현재 실험 결과 요약
+
+> 아래 수치는 최종 Test 성능이 아닙니다. Test split은 아직 사용하지 않았습니다.
+
+| 실험 | 핵심 결과 | 해석 |
+| --- | --- | --- |
+| Random CV 후보 비교 | LightGBM 전체 특성: AP `0.1860`, ROC-AUC `0.6863` | 확률 순위 성능이 가장 높았지만 threshold `0.50`에서는 Fail을 예측하지 못함 |
+| 특징 선택 비교 | L1 선택 모델: 평균 약 187개 feature, 전체 L1 balanced와 유사한 Random CV 성능 | 경량·해석 후보였으나 최종 후보는 아님 |
+| Time Validation | LightGBM 전체 특성: AP `0.0874`, ROC-AUC `0.5666`; L1 선택: AP `0.0637` | 시간 구간에서 성능이 하락했으며 LightGBM이 상대적으로 우세 |
+| OOF threshold 비교 | `0.000475`: Recall `0.329`, Precision `0.218`, F1 `0.262`, FN `49`, FP `86` | OOF F1 최대의 프로젝트 평가용 후보값 |
+| 고정 threshold Time Validation | LightGBM `0.000475`: TP `0`, FP `4`, FN `17`, Recall `0.0000` | Time 구간에서 Fail을 검출하지 못해 모델·threshold를 아직 동결할 수 없음 |
+
+`lightgbm_all`은 Random CV와 초기 Time Validation의 AP 기준으로 상대적으로 우세했던 후보지만, 고정 threshold `0.000475`를 적용한 Time Validation에서 Fail을 검출하지 못했다. 따라서 현재 최종 후보·최종 threshold는 **미확정**이며, Time Train 내부의 시간 순서 검증으로 개선 실험을 진행한 뒤 다시 선정해야 한다. `0.000475`는 현장 자동 폐기나 Lot hold 기준이 아니라, 현장 비용·재검사 처리 용량 정보가 없는 상태에서 기록한 프로젝트용 OOF 비교값이다.
+
 ## 데이터 분할 원칙
 
 - Random split: Train / Validation / Test = **70 / 15 / 15**, 클래스 비율을 보존합니다.
@@ -95,7 +116,7 @@ Final test and model bundle
 
 ## 시작하기
 
-현재 저장소는 프로젝트 문서와 실험 설계를 우선 정리한 상태입니다. 구현 후 아래 순서로 재현할 수 있도록 구성합니다.
+현재 저장소는 데이터 준비부터 OOF threshold 비교까지 구현된 상태입니다. 아래 순서로 실행 환경을 준비합니다.
 
 ```bash
 git clone <repository-url>
@@ -221,16 +242,28 @@ python src/step2_data_check.py
 
 `step2_data_check.py`는 결측률·상수 feature·timestamp·label 분포를 `logs/dataset_log.csv`에 기록합니다. 이 결과는 전체 데이터의 EDA 후보 정보일 뿐이며, 이를 사용해 `secom_cleaned.csv`를 만들거나 모델 feature를 전역에서 제거하지 않습니다. 실제 결측 처리와 feature 선택은 Train/CV 학습 fold 안에서만 fit하여 데이터 누수를 방지합니다. 두 CSV 산출물은 원본과 Profile만 있으면 재생성 가능하므로 Git에서 추적하지 않습니다.
 
-아래 split·모델링 명령은 Day 2~5 구현 후 사용할 예정입니다.
+### 모델링 실험
 
-```bash
-python src/step3_split.py
-python src/step4_baseline.py
-python src/step5_feature_selection.py
-python src/step6_model_compare.py
-python src/step7_threshold.py
-python src/step8_test.py
+`step3_split.py`는 split 재현성과 시간 경계 처리를 검토·보완 중이다. 이미 생성된 split 결과로 아래 모델링 실험을 재실행할 수 있다.
+
+```powershell
+# Random Train/Validation baseline
+python src/step4_baseline.py --train data/splits/random_train.csv --validation data/splits/random_valid.csv --split-strategy random --output logs/baseline_random_result.csv
+
+# Random Train 내부 반복 CV 후보 모델 비교
+python src/step5_model_compare.py --train data/splits/random_train.csv --output logs/model_compare.csv
+
+# PCA·L1·LightGBM Top-K 특징 선택 비교
+python src/step6_feature_compare.py --train data/splits/random_train.csv --output logs/feature_compare.csv --n-jobs -1
+
+# 사전 선택 후보에 OOF 후보 threshold를 그대로 적용한 시간 구간 검증
+python src/step7_time_validation.py --train data/splits/time_train.csv --validation data/splits/time_valid.csv --experiments lightgbm_all --threshold 0.000475 --output logs/time_validation_compare.csv --n-jobs -1
+
+# LightGBM 전체 특성의 OOF 확률·threshold 비교
+python src/step8_threshold_oof.py --train data/splits/random_train.csv --oof-output logs/lightgbm_oof_predictions.csv --threshold-output logs/threshold_compare.csv --n-jobs -1
 ```
+
+`--n-jobs -1`은 LightGBM 내부 병렬 처리를 사용한다. 환경 자원이 제한된 경우 기본값인 `1`을 사용한다.
 
 ## 프로젝트 디렉터리 구조
 
@@ -252,8 +285,14 @@ secom-waferguard/
 │   ├── modeling_metrics.py  # Dataset Profile label 기반 공통 평가 함수
 │   ├── step1_merge_data.py  # Profile ingestion 기반 원본 병합
 │   ├── step2_data_check.py  # EDA용 품질 로그 생성
-│   └── ...                  # 전처리, 학습, 평가, 추론 코드
-├── tests/                   # 설정·schema·평가 함수 자동 테스트
+│   ├── step3_split.py       # Random / Time split 생성
+│   ├── step3_drift_check.py # Time Train/Validation 분포 변화 진단
+│   ├── step4_baseline.py    # Train/Validation baseline 평가
+│   ├── step5_model_compare.py # 후보 모델 반복 CV 비교
+│   ├── step6_feature_compare.py # PCA·L1·Top-K 특징 선택 비교
+│   ├── step7_time_validation.py # 사전 선택 후보의 시간 구간 검증
+│   └── step8_threshold_oof.py # OOF threshold 비교
+├── tests/                   # 설정·schema·평가·실험 함수 자동 테스트
 ├── logs/                    # 데이터·실험 결과 CSV
 ├── models/                  # model.joblib, model_card.json
 └── reports/                 # 프로젝트 분석 보고서 및 결과 시각화
@@ -267,8 +306,8 @@ secom-waferguard/
 | 구분 | 산출물 |
 | --- | --- |
 | 데이터 품질 | `dataset_log.csv`, `split_summary.csv` |
-| 모델 실험 | `baseline_result.csv`, `feature_compare.csv`, `model_compare.csv` |
-| Threshold | `threshold_compare.csv` |
+| 모델 실험 | `baseline_result.csv`, `feature_compare.csv`, `model_compare.csv`, `time_validation_compare.csv` |
+| Threshold | `lightgbm_oof_predictions.csv`, `threshold_compare.csv` |
 | 최종 평가 | `test_result.csv`, confusion matrix, PR curve |
 | 모델 배포 | `model.joblib`, `model_card.json`, `predict_cli.py` |
 | 보고서 | `reports/report.md` |
