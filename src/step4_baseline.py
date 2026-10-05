@@ -282,7 +282,7 @@ def run_baseline_from_files(
 
 def _parse_arguments() -> argparse.Namespace:
     # split 생성 단계가 정한 파일을 명시적으로 받도록 CLI 인자를 정의한다.
-    parser = argparse.ArgumentParser(description="Train/Validation Baseline 평가기")
+    parser = argparse.ArgumentParser(description="Train/Validation Baseline 평가")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--train", type=Path, required=True)
     parser.add_argument("--validation", type=Path, required=True)

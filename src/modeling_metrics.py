@@ -84,11 +84,11 @@ def evaluate_binary_scores(
 ) -> BinaryMetrics:
     # Threshold는 확률 기준값이므로 0~1 범위만 허용
     if not 0.0 <= threshold <= 1.0:
-        raise ValueError("threshold must be between 0.0 and 1.0")
+        raise ValueError("threshold는 0.0 이상 1.0 이하여야 합니다")
 
     # 이진 분류의 정상·불량 Label은 서로 다른 값이어야 함
     if positive_label == negative_label:
-        raise ValueError("positive_label and negative_label must be different")
+        raise ValueError("positive_label과 negative_label은 서로 달라야 합니다")
 
     # Generator, List, Series 등 다양한 입력을 1차원 NumPy Array로 통일
     labels = np.asarray(list(y_true))
@@ -96,22 +96,22 @@ def evaluate_binary_scores(
 
     # Label과 예측 확률은 샘플별로 1:1 대응해야 함
     if labels.ndim != 1 or scores.ndim != 1:
-        raise ValueError("y_true and positive_scores must be one-dimensional")
+        raise ValueError("y_true와 positive_scores는 1차원이어야 합니다")
     if labels.size == 0:
-        raise ValueError("y_true and positive_scores must not be empty")
+        raise ValueError("y_true와 positive_scores는 비어 있으면 안 됩니다")
     if labels.size != scores.size:
-        raise ValueError("y_true and positive_scores must have the same length")
+        raise ValueError("y_true와 positive_scores의 길이는 같아야 합니다")
 
     # 확률 계산 실패로 발생한 NaN/Infinity와 0~1 범위 밖의 값을 사전 차단
     if not np.isfinite(scores).all():
-        raise ValueError("positive_scores must contain only finite values")
+        raise ValueError("positive_scores에는 유한한 값만 포함되어야 합니다")
     if (scores < 0.0).any() or (scores > 1.0).any():
-        raise ValueError("positive_scores must be probabilities between 0.0 and 1.0")
+        raise ValueError("positive_scores는 0.0 이상 1.0 이하의 확률이어야 합니다")
 
     # None, NaN, pd.NA는 정상 Label로 묵시적으로 처리하지 않고 데이터 오류로 차단
     missing_labels = np.asarray(pd.isna(labels), dtype=bool)
     if missing_labels.any():
-        raise ValueError("y_true must not contain missing labels")
+        raise ValueError("y_true에 결측 label이 있으면 안 됩니다")
 
     # Dataset Profile에 정의된 정상·불량 Label 외 값은 성능을 왜곡하므로 즉시 차단
     allowed_labels = (negative_label, positive_label)
@@ -120,14 +120,14 @@ def evaluate_binary_scores(
     ]
     if invalid_labels:
         raise ValueError(
-            "y_true contains labels outside negative_label and positive_label: "
+            "y_true에 negative_label과 positive_label 이외의 label이 있습니다: "
             f"{invalid_labels}"
         )
 
     # 검증된 원본 Label에서 Fail Label만 1로 변환해 지표 기준을 통일
     y_binary = (labels == positive_label).astype(int)
     if y_binary.sum() == 0:
-        raise ValueError("y_true does not contain positive_label")
+        raise ValueError("y_true에 positive_label이 없습니다")
 
     # 예측 확률이 Threshold 이상이면 Fail(1), 미만이면 Pass(0)로 분류
     predictions = (scores >= threshold).astype(int)

@@ -48,17 +48,17 @@ def merge_feature_metadata_pair(
     metadata_source_name = options.get("metadata_source")
     metadata_columns = options.get("metadata_columns")
     if not isinstance(feature_source_name, str) or not feature_source_name:
-        raise ValueError("feature_metadata_pair requires adapter_options.feature_source")
+        raise ValueError("feature_metadata_pair에는 adapter_options.feature_source 설정이 필요합니다")
     if not isinstance(metadata_source_name, str) or not metadata_source_name:
-        raise ValueError("feature_metadata_pair requires adapter_options.metadata_source")
+        raise ValueError("feature_metadata_pair에는 adapter_options.metadata_source 설정이 필요합니다")
     if not isinstance(metadata_columns, list) or not metadata_columns or not all(
         isinstance(column, str) and column for column in metadata_columns
     ):
         raise ValueError(
-            "feature_metadata_pair requires non-empty adapter_options.metadata_columns"
+            "feature_metadata_pair에는 비어 있지 않은 adapter_options.metadata_columns 설정이 필요합니다"
         )
     if len(metadata_columns) != len(set(metadata_columns)):
-        raise ValueError("adapter_options.metadata_columns must not contain duplicates")
+        raise ValueError("adapter_options.metadata_columns에 중복 column이 있으면 안 됩니다")
 
     # source마다 Profile이 선언한 pandas read_csv 옵션을 그대로 적용한다.
     feature_source = ingestion.get_source(feature_source_name)
@@ -75,14 +75,14 @@ def merge_feature_metadata_pair(
     # 원본 두 파일은 동일한 wafer 행 순서를 공유해야 하므로 행 수를 먼저 검증
     if len(feature_frame) != len(metadata_frame):
         raise ValueError(
-            "feature and metadata row counts must match: "
+            "feature와 metadata의 행 수가 일치해야 합니다: "
             f"{len(feature_frame)} != {len(metadata_frame)}"
         )
 
     # metadata 열 수와 순서가 Profile 정의와 다르면 Label·Timestamp 정렬을 신뢰할 수 없음
     if metadata_frame.shape[1] != len(metadata_columns):
         raise ValueError(
-            "metadata column count does not match adapter_options.metadata_columns: "
+            "metadata column 수가 adapter_options.metadata_columns와 일치하지 않습니다: "
             f"{metadata_frame.shape[1]} != {len(metadata_columns)}"
         )
 
@@ -92,9 +92,9 @@ def merge_feature_metadata_pair(
         expected_metadata_columns.append(dataset.timestamp_column)
     if metadata_columns != expected_metadata_columns:
         raise ValueError(
-            "adapter_options.metadata_columns must match Dataset Profile label/timestamp "
-            f"columns: expected={expected_metadata_columns}, "
-            f"actual={metadata_columns}"
+            "adapter_options.metadata_columns는 Dataset Profile의 label/timestamp "
+            f"column과 일치해야 합니다: 기대값={expected_metadata_columns}, "
+            f"실제값={metadata_columns}"
         )
 
     metadata_frame.columns = metadata_columns
@@ -102,14 +102,14 @@ def merge_feature_metadata_pair(
     # 이름 없는 feature 행렬은 prefix 방식에서만 안전하게 canonical 컬럼명으로 변환한다.
     if dataset.feature_selection_mode == "prefix":
         if not dataset.feature_column_prefix:
-            raise ValueError("prefix mode requires a non-empty feature column prefix")
+            raise ValueError("prefix 방식에는 비어 있지 않은 feature column prefix가 필요합니다")
         feature_frame.columns = [
             f"{dataset.feature_column_prefix}{index}"
             for index in range(feature_frame.shape[1])
         ]
     elif not all(isinstance(column, str) and column for column in feature_frame.columns):
         raise ValueError(
-            "all_except_metadata mode requires named feature columns from the source"
+            "all_except_metadata 방식에는 source에 이름이 있는 feature column이 필요합니다"
         )
 
     # metadata와 feature를 같은 행 순서로 결합해 canonical table을 생성
@@ -142,12 +142,12 @@ def merge_dataset(config_path: Path | str, output_path: Path | None = None) -> P
 
     # canonical table을 만들 원본 ingestion 정의가 없으면 명확하게 중단
     if ingestion is None:
-        raise ValueError(f"dataset '{dataset.dataset_id}' does not define ingestion settings")
+        raise ValueError(f"데이터셋 '{dataset.dataset_id}'에 ingestion 설정이 없습니다")
 
     # registry에서 원본 형식별 처리기를 선택한다.
     adapter = INGESTION_ADAPTERS.get(ingestion.adapter)
     if adapter is None:
-        raise ValueError(f"unsupported ingestion adapter: {ingestion.adapter}")
+        raise ValueError(f"지원하지 않는 ingestion adapter입니다: {ingestion.adapter}")
     merged_frame = adapter(dataset, ingestion)
 
     # 호출자가 경로를 주지 않으면 Profile의 canonical input_path를 사용
@@ -170,7 +170,7 @@ def merge_dataset(config_path: Path | str, output_path: Path | None = None) -> P
 # - --output으로 canonical merged CSV의 저장 위치를 일시적으로 변경
 # ==========================================
 def parse_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Merge raw data using a Dataset Profile")
+    parser = argparse.ArgumentParser(description="Dataset Profile 기반 원본 데이터 병합")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--output", type=Path)
     return parser.parse_args()

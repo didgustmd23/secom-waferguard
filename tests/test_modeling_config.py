@@ -44,7 +44,7 @@ class ModelingConfigTest(unittest.TestCase):
                 json.dumps(profile), encoding="utf-8"
             )
 
-            with self.assertRaisesRegex(ValueError, "required key: positive"):
+            with self.assertRaisesRegex(ValueError, "필수 key가 없습니다: positive"):
                 load_dataset_spec(invalid_profile_path)
 
     # 결측률 기준이 0~1 범위를 벗어나면 데이터 품질 정책으로 사용하지 못하게 차단

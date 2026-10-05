@@ -103,5 +103,5 @@ class Step1MergeDataTest(unittest.TestCase):
             )
 
             # 행 정렬을 보장할 수 없으므로 concat 전에 오류가 발생해야 한다.
-            with self.assertRaisesRegex(ValueError, "row counts must match"):
+            with self.assertRaisesRegex(ValueError, "행 수가 일치해야"):
                 merge_feature_metadata_pair(self._dataset(), ingestion)

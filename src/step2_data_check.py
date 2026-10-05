@@ -277,7 +277,7 @@ def run_quality_check(
 # - --output으로 데이터 품질 로그 저장 위치를 일시적으로 변경
 # ==========================================
 def parse_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run Dataset Profile quality checks")
+    parser = argparse.ArgumentParser(description="Dataset Profile 기반 데이터 품질 점검")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--output", type=Path)
     return parser.parse_args()
