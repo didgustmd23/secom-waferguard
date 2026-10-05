@@ -22,6 +22,7 @@ try:
     from src.step6_feature_compare import build_experiments
     from src.modeling_preprocessing import fitted_feature_count
     from src.split_contract import PROTOCOL_ID, validate_split_pair
+    from src.step8_threshold_oof import validate_threshold_report
 except ModuleNotFoundError:
     from modeling_config import DEFAULT_CONFIG_PATH, ModelingConfig, load_modeling_config
     from modeling_metrics import evaluate_binary_scores
@@ -29,6 +30,7 @@ except ModuleNotFoundError:
     from step6_feature_compare import build_experiments
     from modeling_preprocessing import fitted_feature_count
     from split_contract import PROTOCOL_ID, validate_split_pair
+    from step8_threshold_oof import validate_threshold_report
 
 
 # 기존 탐색 단계의 비교 후보 목록이다. 새 평가에서도 후보를 Train 내부에서 사전 선정한다.
@@ -63,6 +65,7 @@ def compare_time_validation(
     experiment_names: tuple[str, ...] = PRESELECTED_EXPERIMENTS,
     threshold: float | None = None,
     n_jobs: int = 1,
+    threshold_report: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     if not experiment_names:
         raise ValueError("시간 검증할 후보 모델을 하나 이상 지정해야 합니다.")
@@ -86,6 +89,11 @@ def compare_time_validation(
     )
     if not 0.0 <= evaluation_threshold <= 1.0:
         raise ValueError("Time Validation threshold는 0.0 이상 1.0 이하여야 합니다.")
+    if threshold_report is not None:
+        if threshold is None or len(experiment_names) != 1:
+            raise ValueError("threshold 비교표를 적용할 때는 threshold와 후보 모델 하나를 명시하세요.")
+        validate_threshold_report(threshold_report, train_frame, config,
+                                  experiment_names[0], evaluation_threshold)
 
     # step6과 동일한 후보 정의를 재사용해 Random CV와의 모델 조건을 유지한다.
     available_experiments = build_experiments(config, n_jobs=n_jobs)
@@ -155,6 +163,7 @@ def compare_time_validation_from_files(
     experiment_names: tuple[str, ...] = PRESELECTED_EXPERIMENTS,
     threshold: float | None = None,
     n_jobs: int = 1,
+    threshold_report_path: Path | str | None = None,
 ) -> pd.DataFrame:
     # 파일을 읽는 경계에서만 I/O를 수행하고, 실제 평가는 순수 함수에 위임한다.
     config = load_modeling_config(config_path)
@@ -165,6 +174,7 @@ def compare_time_validation_from_files(
         experiment_names=experiment_names,
         threshold=threshold,
         n_jobs=n_jobs,
+        threshold_report=pd.read_csv(threshold_report_path) if threshold_report_path is not None else None,
     )
 
     path = Path(output_path)
@@ -179,6 +189,8 @@ def _parse_arguments() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--train", type=Path, required=True)
     parser.add_argument("--validation", type=Path, required=True)
+    parser.add_argument("--threshold-report", type=Path,
+                        help="새 단일 OOF threshold 비교표. 학습 계약·모델·방식을 검사합니다.")
     parser.add_argument(
         "--output", type=Path, default=Path("logs/time_validation_compare.csv")
     )
@@ -218,6 +230,7 @@ def main() -> None:
         experiment_names=tuple(arguments.experiments),
         threshold=arguments.threshold,
         n_jobs=arguments.n_jobs,
+        threshold_report_path=arguments.threshold_report,
     )
     print(result.to_string(index=False))
     print(f"결과 저장 경로: {arguments.output}")

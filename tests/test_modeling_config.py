@@ -11,10 +11,35 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.modeling_config import MODELING_CONFIG, load_dataset_spec
+from src.modeling_config import MODELING_CONFIG, load_dataset_spec, load_modeling_config
 
 
 class ModelingConfigTest(unittest.TestCase):
+    def _load_variant(self, section, key, value):
+        # 실제 설정은 보존하고 경계값을 바꾼 임시 설정만 로드한다.
+        raw = json.loads(Path("config.json").read_text(encoding="utf-8"))
+        raw["dataset_profile"] = str(Path("configs/datasets/secom.json").resolve())
+        raw[section][key] = value
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            return load_modeling_config(path)
+
+    def test_rejects_unknown_candidate(self):
+        with self.assertRaisesRegex(ValueError, "지원하지 않는 모델"):
+            self._load_variant("models", "candidates", ["lightgbm", "unknown"])
+
+    def test_rejects_pca_ratio_one(self):
+        with self.assertRaisesRegex(ValueError, "1 미만"):
+            self._load_variant("experiment", "pca_explained_variance", 1.0)
+
+    def test_rejects_negative_seed(self):
+        with self.assertRaisesRegex(ValueError, "random_state"):
+            self._load_variant("experiment", "random_state", -1)
+
+    def test_rejects_unknown_baseline(self):
+        with self.assertRaisesRegex(ValueError, "baseline"):
+            self._load_variant("models", "baseline", "unknown")
     # 기본 config.json이 SECOM의 데이터 구조와 실험 조건을 분리해 로드하는지 확인
     def test_default_config_loads_secom_profile(self) -> None:
         self.assertEqual(MODELING_CONFIG.dataset.dataset_id, "secom")

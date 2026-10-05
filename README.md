@@ -13,7 +13,7 @@
 | 범용 설정 코어 | 완료 | `config.json`과 Dataset Profile을 분리해 로드·검증 |
 | 데이터 구조 검증 | 완료 | Profile 기준 label·metadata·feature 컬럼 검증 |
 | 공통 평가 | 완료 | Profile label 기반 Recall, AP, Precision, F1, ROC-AUC 계산 |
-| 자동 테스트 | 완료 | 설정·schema·평가·전처리·split 계약·실험 함수 62개 테스트 |
+| 자동 테스트 | 완료 | 설정·schema·평가·전처리·split 계약·실험 함수 74개 테스트 |
 | 데이터 병합·품질 점검 | 완료 | Profile 기반 canonical 병합과 재생성 가능한 품질 로그 |
 | Random / Time split | 구현 완료 | 팀원의 `step3_split.py`에 Profile·누수 검사·원본 ID를 통합. Random은 탐색용, 후보 비교·OOF는 Time Train 사용 |
 | Baseline | 완료 | Train/Validation 기반 Logistic Regression 평가 및 공통 지표 기록 |
@@ -98,7 +98,11 @@ Final test and model bundle
 
 ### 현재 실험 결과 요약
 
-> 아래 수치는 최종 Test 성능이 아닙니다. Test split은 아직 사용하지 않았습니다.
+교정된 Step 3 기준 Step 4·5 재실행 결과: Time Train 내부 CV AP는 LightGBM **0.2360**, Random Forest **0.2323**이며, threshold 0.50의 Recall은 L1 balanced **0.2635**가 가장 높았다. Baseline의 Time Validation AP는 **0.0679**, Recall은 **0.0000**이다. Step 6에서는 LightGBM Top-100이 AP **0.2302**, L1 선택은 평균 약 **186개** 특징으로 전체 L1과 거의 같은 성능을 기록했다. Step 7 시간 검증 AP는 LightGBM **0.0874**, L1 선택 **0.0637**이며 두 후보 모두 Recall **0**이었다. 최종 모델·threshold는 미확정이고 다음은 동일한 Time Train의 단일 OOF threshold 비교다. 기존 Random 결과와 학습 표본이 다르며 관찰한 시간 구간은 개발용 검증 데이터로 취급한다. 상세 결과는 [중간 보고서](reports/report.md)의 12~14절, 재실행 로그는 `logs/integrated/`에 기록한다.
+
+> 아래 표는 기존 탐색 실험 기록이며 최종 Test 성능이 아닙니다.
+
+Step 8 단일 OOF의 격자 내 F1 최대 후보는 약 **0.00002343**(Recall **0.6410**, Precision **0.1689**)이었다. 같은 값을 Time Validation에 적용한 결과 Recall **0.0588**, Precision **0.0500**으로 하락해 확정을 보류했다. Time Train 내부의 시간순 threshold 전이 비교에서도 후보별 threshold와 오탐 수가 구간에 따라 크게 달라 안정적인 단일 모델을 고르지 못했다. 현장 재검사 용량·FN/FP 비용 기준이 정해지기 전까지 운영 threshold는 미정이다. 상세 결과는 보고서 15~20절에 기록했다.
 
 | 실험 | 핵심 결과 | 해석 |
 | --- | --- | --- |
@@ -272,7 +276,9 @@ python src/step7_time_validation.py --train data/splits/integrated/time_train.cs
 
 Step 3을 재실행할 때는 새로운 `--output-dir`과 `--log-dir`을 지정한다. `--config`, `--input`, `--figures-dir`로 경로를 변경할 수 있고, `--skip-eda`는 분할·검사만 수행한다. 그룹이 없는 Random split은 기존 stratify 방식을 유지한다. 그룹이 선언되면 GroupShuffleSplit을 사용하므로 정확한 행 비율·class 비율은 보장되지 않으며 실제 비율을 요약에서 확인한다. 누수 검사 실패 시 split CSV를 저장하지 않고 오류로 종료한다.
 
-위 LightGBM 명령은 실행 예시이며 최종 후보 확정을 뜻하지 않는다. 기존 `0.000475`를 새 평가 threshold로 그대로 승계하지 않는다. OOF 평균 확률과 단일 재학습 모델의 척도 차이·시간순 내부 검증은 후속 점검 대상이다.
+위 LightGBM 명령은 실행 예시이며 최종 후보 확정을 뜻하지 않는다. 기존 `0.000475`를 새 평가 threshold로 그대로 승계하지 않는다. Step 8의 기본 `--score-method single`은 1회 K-fold의 샘플별 OOF 예측을 사용한다. 후보 비교의 5-fold × 5-repeats 정책은 그대로 유지한다. `--score-method repeated_mean`은 반복 평균 분석용이며 결과의 `threshold_use=analysis_only`로 구분한다. 단일 OOF도 fold 학습과 전체 Train 재학습의 확률 척도 일치를 보장하지 않으며, 시간순 내부 검증·확률 보정은 후속 점검 대상이다.
+
+새 OOF 비교표에서 threshold를 선택한 뒤 Step 7에 `--threshold-report logs/integrated/threshold_compare.csv --threshold <비교표의_반올림하지_않은_값>`을 전달하면 데이터셋·Train 생성 계약·모델·단일 OOF 방식과 값의 존재 여부를 검사한다. `<…>`는 실제 숫자로 바꿔야 한다. 비교표 없이 실행하는 기존 CLI는 탐색용 호환 경로이며 출처 확인을 보장하지 않는다. 같은 계약이라도 모델 설정을 변경했다면 비교표를 다시 생성해야 한다.
 
 새 split의 `__source_row_id`는 원본 CSV 내 행 위치, `__split_role`은 train/validation/test, `__split_protocol_id`는 원본·Profile·비율의 생성 계약 해시다. 이 컬럼들은 모델 입력에서 제외한다. Baseline·시간 검증은 중복 행과 계약 혼합을 검사하고, 후보 비교·OOF는 Validation/Test 역할의 입력을 거부한다. 기존 metadata 없는 CSV도 사용할 수 있지만 출처까지 보장하지 못하므로 탐색용으로만 취급한다.
 
