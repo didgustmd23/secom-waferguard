@@ -1,11 +1,15 @@
 # ==========================================
 # 범용 전처리 회귀 테스트
 # - 모든 후보와 특징 선택 실험이 Profile 범주형 입력을 처리하는지 확인
-# - 전부 결측인 컬럼 보존 및 변환 후 실제 특징 수 기록을 확인
+# - 전부 결측인 컬럼 제거 및 변환 후 실제 특징 수 기록을 확인
 # - OOF 생성 횟수와 원본 행 ID 전달을 실제 Pipeline으로 검증
 # ==========================================
 
 import unittest
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 from dataclasses import replace
 
 import numpy as np
@@ -15,7 +19,7 @@ from src.modeling_config import CrossValidationConfig, MODELING_CONFIG
 from src.modeling_preprocessing import fitted_feature_count
 from src.step5_model_compare import build_candidate_pipelines, compare_candidates
 from src.step6_feature_compare import build_experiments, compare_features
-from src.step8_threshold_oof import generate_oof_scores
+from src.step8_threshold_oof import generate_oof_scores, run_threshold_oof_from_file
 from src.split_contract import SOURCE_ROW_ID, SPLIT_ROLE, PROTOCOL_ID
 
 
@@ -54,13 +58,13 @@ class GenericPreprocessingTest(unittest.TestCase):
         result = compare_features(frame, config)
         self.assertEqual(result.loc[result.experiment == "lightgbm_all", "selected_feature_count_mean"].item(), 3)
 
-    def test_preserves_entirely_missing_numeric_columns(self):
+    def test_removes_entirely_missing_numeric_columns(self):
         frame = self._frame().assign(sensor_c=np.nan)
         pipeline = build_experiments(self.config)["lightgbm_all"]
         pipeline.fit(frame.drop(columns="target"), frame.target)
-        self.assertEqual(fitted_feature_count(pipeline), 3)
-        result = compare_features(frame, self.config)
-        self.assertEqual(result.loc[result.experiment == "lightgbm_top_3", "selected_feature_count_mean"].item(), 3)
+        self.assertEqual(fitted_feature_count(pipeline), 2)
+        result = compare_features(frame, replace(self.config, top_k_feature_counts=(2,)))
+        self.assertEqual(result.loc[result.experiment == "lightgbm_top_2", "selected_feature_count_mean"].item(), 2)
 
     def test_top_k_checks_encoded_fold_width(self):
         frame = self._frame()[["sensor_a", "target"]].assign(machine="only_category")
@@ -89,6 +93,37 @@ class GenericPreprocessingTest(unittest.TestCase):
         self.assertEqual(scores.oof_prediction_count.tolist(), [1] * len(scores))
         self.assertEqual(set(scores.oof_score_method), {"single"})
         self.assertEqual(set(scores.threshold_use), {"candidate"})
+
+    def test_cv_results_record_fold_removal_counts(self):
+        # 결과의 각 모델 행에 학습 fold별 실제 제거 개수와 센서명이 저장되는지 확인한다.
+        frame = self._frame().assign(sensor_c=np.nan)
+        config = replace(self.config, top_k_feature_counts=(2,),
+                         candidate_models=("logistic_regression_l1",))
+        for results in (compare_candidates(frame, config), compare_features(frame, config)):
+            for log in results.quality_filter_log:
+                records = json.loads(log)
+                self.assertEqual(len(records), 2)
+                self.assertEqual([record["fold"] for record in records], [1, 2])
+                for record in records:
+                    self.assertEqual(record["high_missing_features"], ["sensor_c"])
+                    self.assertEqual(record["removed_feature_count"], 1)
+                    self.assertEqual(record["retained_feature_count"], 2)
+
+    def test_oof_writes_fold_quality_log(self):
+        # 샘플별 점수 파일 옆의 로그에서 fold별 제거 개수와 JSON 센서명을 확인한다.
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            train_path = root / "train.csv"
+            self._frame().assign(sensor_c=np.nan).to_csv(train_path, index=False)
+            with patch("src.step8_threshold_oof.load_modeling_config", return_value=self.config):
+                run_threshold_oof_from_file(root / "config.json", train_path,
+                                            root / "oof.csv", root / "threshold.csv")
+            written = pd.read_csv(root / "oof_quality_filter.csv")
+            self.assertEqual(written.fold.tolist(), [1, 2])
+            self.assertEqual(written.removed_feature_count.tolist(), [1, 1])
+            self.assertEqual(written.retained_feature_count.tolist(), [2, 2])
+            self.assertEqual(written.high_missing_features.map(json.loads).tolist(),
+                             [["sensor_c"], ["sensor_c"]])
 
 
 if __name__ == "__main__":

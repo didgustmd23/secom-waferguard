@@ -20,13 +20,13 @@ try:
     from src.modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
     from src.modeling_metrics import evaluate_binary_scores
     from src.step4_baseline import split_frame_to_xy
-    from src.modeling_preprocessing import preprocessing_steps, fitted_feature_count
+    from src.modeling_preprocessing import preprocessing_steps, fitted_feature_count, quality_filter_record, quality_filter_json
     from src.split_contract import PROTOCOL_ID, validate_train_role, training_folds
 except ModuleNotFoundError:
     from modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
     from modeling_metrics import evaluate_binary_scores
     from step4_baseline import split_frame_to_xy
-    from modeling_preprocessing import preprocessing_steps, fitted_feature_count
+    from modeling_preprocessing import preprocessing_steps, fitted_feature_count, quality_filter_record, quality_filter_json
     from split_contract import PROTOCOL_ID, validate_train_role, training_folds
 
 
@@ -72,17 +72,20 @@ def compare_features(frame,config,n_jobs: int = 1):
     rows=[]
     for name,pipeline in build_experiments(config,n_jobs).items():
       values=[]; times=[]; counts=[]
+      quality_records=[]
       for fit_i,val_i in training_folds(x,y,frame,config):
         # 매 fold마다 Pipeline을 복제해 selector와 model이 validation 정보를 보지 못하게 한다.
         model=clone(pipeline); started=perf_counter(); model.fit(x.iloc[fit_i],y.iloc[fit_i]); times.append(perf_counter()-started)
         # One-Hot 확장·선택 이후 최종 모델에 전달된 실제 특징 수를 기록한다.
         counts.append(fitted_feature_count(model))
+        quality_records.append(quality_filter_record(model,fold=len(quality_records)+1))
         pos=list(model.named_steps["model"].classes_).index(config.dataset.positive_label); score=model.predict_proba(x.iloc[val_i])[:,pos]
         metric=evaluate_binary_scores(y.iloc[val_i],score,positive_label=config.dataset.positive_label,negative_label=config.dataset.negative_label,threshold=config.experiment.default_threshold)
         values.append(metric)
       row={"dataset_id":config.dataset.dataset_id,"split_strategy":"random_cv","experiment":name,"n_splits":config.experiment.cv.n_splits,"n_repeats":config.experiment.cv.n_repeats,"threshold":config.experiment.default_threshold,"selected_feature_count_mean":float(np.mean(counts)),"fit_time_mean_seconds":float(np.mean(times))}
       row["split_strategy"]="time_train_cv" if PROTOCOL_ID in frame and str(frame[PROTOCOL_ID].iloc[0]).startswith("time:") else "random_cv"
       row["training_protocol_id"]=frame[PROTOCOL_ID].iloc[0] if PROTOCOL_ID in frame else None
+      row["quality_filter_log"]=quality_filter_json(quality_records)
       for key in ("average_precision","recall","precision","f1","roc_auc"):
         metric_values=[getattr(v,key) for v in values if getattr(v,key) is not None]; row[f"{key}_mean"]=float(np.mean(metric_values)); row[f"{key}_std"]=float(np.std(metric_values))
       rows.append(row)
@@ -91,5 +94,5 @@ def compare_features(frame,config,n_jobs: int = 1):
 def main():
     # 결과 CSV는 최신 실행 결과로 교체하며 Test·Time Validation 파일은 받지 않는다.
     parser=argparse.ArgumentParser(description="CV 내부 feature 선택 비교"); parser.add_argument("--config",type=Path,default=DEFAULT_CONFIG_PATH); parser.add_argument("--train",type=Path,required=True); parser.add_argument("--output",type=Path,default=Path("logs/feature_compare.csv")); parser.add_argument("--n-jobs",type=int,default=1); args=parser.parse_args()
-    result=compare_features(pd.read_csv(args.train),load_modeling_config(args.config),args.n_jobs); args.output.parent.mkdir(parents=True,exist_ok=True); result.to_csv(args.output,index=False,encoding="utf-8-sig"); print(result.to_string(index=False))
+    result=compare_features(pd.read_csv(args.train),load_modeling_config(args.config),args.n_jobs); args.output.parent.mkdir(parents=True,exist_ok=True); result.to_csv(args.output,index=False,encoding="utf-8-sig"); print(result.drop(columns="quality_filter_log").to_string(index=False))
 if __name__=="__main__": main()

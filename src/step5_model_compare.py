@@ -24,13 +24,13 @@ try:
     from src.modeling_config import DEFAULT_CONFIG_PATH, ModelingConfig, load_modeling_config
     from src.modeling_metrics import evaluate_binary_scores
     from src.step4_baseline import split_frame_to_xy
-    from src.modeling_preprocessing import preprocessing_steps
+    from src.modeling_preprocessing import preprocessing_steps, quality_filter_record, quality_filter_json
     from src.split_contract import PROTOCOL_ID, validate_train_role, training_folds
 except ModuleNotFoundError:
     from modeling_config import DEFAULT_CONFIG_PATH, ModelingConfig, load_modeling_config
     from modeling_metrics import evaluate_binary_scores
     from step4_baseline import split_frame_to_xy
-    from modeling_preprocessing import preprocessing_steps
+    from modeling_preprocessing import preprocessing_steps, quality_filter_record, quality_filter_json
     from split_contract import PROTOCOL_ID, validate_train_role, training_folds
 
 
@@ -102,6 +102,7 @@ def compare_candidates(train_frame: pd.DataFrame, config: ModelingConfig) -> pd.
             continue
         fold_metrics: list[dict[str, float]] = []
         fit_times: list[float] = []
+        quality_records = []
         for fit_index, valid_index in training_folds(train_x, train_y, train_frame, config):
             model = clone(pipeline)
             # LightGBM의 불량 가중치는 현재 CV 학습 fold의 class 수로만 계산한다.
@@ -113,6 +114,8 @@ def compare_candidates(train_frame: pd.DataFrame, config: ModelingConfig) -> pd.
             started_at = perf_counter()
             model.fit(train_x.iloc[fit_index], train_y.iloc[fit_index])
             fit_times.append(perf_counter() - started_at)
+            # 제거 개수와 센서명은 해당 fold 학습 결과에서 가져온다.
+            quality_records.append(quality_filter_record(model, fold=len(quality_records) + 1))
             positive_index = list(model.named_steps["model"].classes_).index(config.dataset.positive_label)
             scores = model.predict_proba(train_x.iloc[valid_index])[:, positive_index]
             metrics = evaluate_binary_scores(
@@ -135,6 +138,7 @@ def compare_candidates(train_frame: pd.DataFrame, config: ModelingConfig) -> pd.
             "threshold": config.experiment.default_threshold,
             "fit_time_mean_seconds": float(np.mean(fit_times)),
             "fit_time_std_seconds": float(np.std(fit_times)),
+            "quality_filter_log": quality_filter_json(quality_records),
         }
         for metric_name in ("average_precision", "recall", "precision", "f1", "roc_auc"):
             values = [fold[metric_name] for fold in fold_metrics if metric_name in fold]
@@ -157,7 +161,7 @@ def main() -> None:
     results = compare_candidates(pd.read_csv(arguments.train), config)
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     results.to_csv(arguments.output, index=False, encoding="utf-8-sig")
-    print(results.to_string(index=False))
+    print(results.drop(columns="quality_filter_log").to_string(index=False))
 
 
 if __name__ == "__main__":

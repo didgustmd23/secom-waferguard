@@ -27,13 +27,13 @@ try:
     from src.dataset_schema import validate_dataset_frame
     from src.modeling_config import DEFAULT_CONFIG_PATH, DatasetSpec, ModelingConfig, load_modeling_config
     from src.modeling_metrics import BinaryMetrics, evaluate_binary_scores
-    from src.modeling_preprocessing import preprocessing_steps
+    from src.modeling_preprocessing import preprocessing_steps, quality_filter_record, quality_filter_json
     from src.split_contract import validate_split_pair
 except ModuleNotFoundError:
     from dataset_schema import validate_dataset_frame
     from modeling_config import DEFAULT_CONFIG_PATH, DatasetSpec, ModelingConfig, load_modeling_config
     from modeling_metrics import BinaryMetrics, evaluate_binary_scores
-    from modeling_preprocessing import preprocessing_steps
+    from modeling_preprocessing import preprocessing_steps, quality_filter_record, quality_filter_json
     from split_contract import validate_split_pair
 
 
@@ -54,6 +54,7 @@ class BaselineResult:
     split_strategy: str | None = None
     train_path: str | None = None
     validation_path: str | None = None
+    quality_filter_log: str = "[]"
 
     def to_dict(self) -> dict[str, object]:
         # metrics 객체를 평탄화하여 CSV의 한 행으로 바로 저장할 수 있게 만든다.
@@ -63,6 +64,7 @@ class BaselineResult:
             "train_samples": self.train_samples,
             "validation_samples": self.validation_samples,
             "feature_count": self.feature_count,
+            "quality_filter_log": self.quality_filter_log,
             "training_seconds": self.training_seconds,
             "split_strategy": self.split_strategy,
             "train_path": self.train_path,
@@ -73,7 +75,7 @@ class BaselineResult:
 
 # ==========================================
 # Dataset Profile의 feature 타입에 맞는 Baseline Pipeline 생성
-# - 범주형 feature가 없으면 계획서와 같은 median → scaler → logistic 순서를 사용
+# - 센서 품질 필터를 먼저 적용한 뒤 median → scaler → logistic 순서로 학습
 # - 범주형 feature가 선언된 경우에만 ColumnTransformer를 사용해 타입별 전처리를 분리
 # - 모든 전처리기는 train split의 fit 단계에서만 학습되어 validation 정보가 섞이지 않음
 # ==========================================
@@ -195,7 +197,8 @@ def run_baseline(
         model_name=config.baseline_model,
         train_samples=len(train_frame),
         validation_samples=len(validation_frame),
-        feature_count=len(feature_columns),
+        feature_count=len(pipeline.named_steps["quality_filter"].retained_features_),
+        quality_filter_log=quality_filter_json([quality_filter_record(pipeline)]),
         training_seconds=training_seconds,
         metrics=metrics,
     )

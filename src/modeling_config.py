@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Final
 
@@ -104,10 +104,21 @@ class ExperimentProtocol:
 
 
 # ==========================================
-# 전체 모델링 설정 객체
-# - dataset은 현재 선택된 Dataset Profile
-# - experiment와 model 목록은 데이터셋과 독립적인 비교 조건
-# - Day 2~4 Script는 이 객체만 받아 동일한 조건으로 실행
+# OOF threshold 선택용 평가 정책
+# - 최소 Recall과 최대 재검사 비율을 데이터셋과 독립적으로 관리
+# - 미충족 시 임의 후보를 선택하지 않고 결과만 기록
+# ==========================================
+@dataclass(frozen=True)
+class ThresholdPolicy:
+    # 목표값은 사람이 설정하고 실제 threshold는 OOF 후보에서 계산한다.
+    min_recall: float = 0.7
+    max_reinspection_ratio: float = 0.2
+    selection_rule: str = "min_reinspection"
+    on_infeasible: str = "report_only"
+
+
+# ==========================================
+# Dataset Profile·실험 조건·평가 정책을 묶은 공통 설정
 # ==========================================
 @dataclass(frozen=True)
 class ModelingConfig:
@@ -118,6 +129,7 @@ class ModelingConfig:
     top_k_feature_counts: tuple[int, ...]
     baseline_model: str
     candidate_models: tuple[str, ...]
+    threshold_policy: ThresholdPolicy = ThresholdPolicy()
 
 
 # ==========================================
@@ -412,6 +424,21 @@ def load_modeling_config(config_path: Path | str = DEFAULT_CONFIG_PATH) -> Model
     models = _require_mapping(raw_config, "models")
     cv = _require_mapping(experiment, "cross_validation")
 
+    # 기존 설정 파일도 로드하되, 정책이 있으면 필수 항목·범위를 엄격히 검증한다.
+    policy = raw_config.get("threshold_policy", asdict(ThresholdPolicy()))
+    if not isinstance(policy, dict):
+        raise ValueError("threshold_policy는 object여야 합니다")
+    min_recall = float(_require_value(policy, "min_recall", (int, float)))
+    max_reinspection = float(_require_value(policy, "max_reinspection_ratio", (int, float)))
+    selection_rule = _require_value(policy, "selection_rule", str)
+    on_infeasible = _require_value(policy, "on_infeasible", str)
+    if not 0 <= min_recall <= 1 or not 0 <= max_reinspection <= 1:
+        raise ValueError("threshold_policy의 목표 비율은 0 이상 1 이하의 유한한 값이어야 합니다")
+    if selection_rule != "min_reinspection":
+        raise ValueError("threshold_policy.selection_rule은 min_reinspection만 지원합니다")
+    if on_infeasible != "report_only":
+        raise ValueError("threshold_policy.on_infeasible은 report_only만 지원합니다")
+
     # 데이터셋과 독립적인 수치 기반 실험 설정을 읽음
     random_state = _require_value(experiment, "random_state", int)
     default_threshold = float(_require_value(experiment, "default_threshold", (int, float)))
@@ -479,6 +506,7 @@ def load_modeling_config(config_path: Path | str = DEFAULT_CONFIG_PATH) -> Model
         top_k_feature_counts=top_k_feature_counts,
         baseline_model=baseline_model,
         candidate_models=candidate_models,
+        threshold_policy=ThresholdPolicy(min_recall, max_reinspection, selection_rule, on_infeasible),
     )
 
 

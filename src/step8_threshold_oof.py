@@ -21,12 +21,14 @@ try:
     from src.modeling_metrics import evaluate_binary_scores
     from src.step4_baseline import split_frame_to_xy
     from src.step6_feature_compare import build_experiments
+    from src.modeling_preprocessing import quality_filter_record, quality_filter_json
     from src.split_contract import SOURCE_ROW_ID, PROTOCOL_ID, validate_train_role, training_folds
 except ModuleNotFoundError:
     from modeling_config import DEFAULT_CONFIG_PATH, ModelingConfig, load_modeling_config
     from modeling_metrics import evaluate_binary_scores
     from step4_baseline import split_frame_to_xy
     from step6_feature_compare import build_experiments
+    from modeling_preprocessing import quality_filter_record, quality_filter_json
     from split_contract import SOURCE_ROW_ID, PROTOCOL_ID, validate_train_role, training_folds
 
 
@@ -64,12 +66,14 @@ def generate_oof_scores(
 
     score_sum = np.zeros(len(train_frame), dtype=float)
     prediction_count = np.zeros(len(train_frame), dtype=int)
+    quality_records = []
     started_at = perf_counter()
 
     for fit_indices, validation_indices in training_folds(features, labels, train_frame, oof_config):
         # fold별 Pipeline을 새로 만들어 imputing과 model fit이 validation에 닿지 않게 한다.
         pipeline = clone(experiments[EXPERIMENT_NAME])
         pipeline.fit(features.iloc[fit_indices], labels.iloc[fit_indices])
+        quality_records.append(quality_filter_record(pipeline, fold=len(quality_records) + 1))
 
         fitted_model = pipeline.named_steps["model"]
         class_positions = [
@@ -105,6 +109,8 @@ def generate_oof_scores(
             "threshold_use": "candidate" if score_method == "single" else "analysis_only",
         }
     )
+    # fold별 제거 기록은 샘플별 점수와 별도로 보존해 같은 로그의 중복 저장을 방지한다.
+    oof_frame.attrs["quality_filter_records"] = quality_records
     return oof_frame, elapsed_seconds
 
 
@@ -164,6 +170,7 @@ def compare_thresholds(
                 "oof_score_method": oof_frame["oof_score_method"].iloc[0] if "oof_score_method" in oof_frame else "unknown",
                 "threshold_use": oof_frame["threshold_use"].iloc[0] if "threshold_use" in oof_frame else "analysis_only",
                 **asdict(metrics),
+                "reinspection_ratio": (metrics.true_positive + metrics.false_positive) / metrics.support,
             }
         )
 
@@ -226,6 +233,13 @@ def run_threshold_oof_from_file(
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         frame.to_csv(path, index=False, encoding="utf-8-sig")
+
+    # OOF 점수 파일 옆에 fold별 센서 제거 개수와 JSON 센서 목록을 함께 저장한다.
+    quality_log = pd.DataFrame(oof_frame.attrs["quality_filter_records"])
+    for column in ("high_missing_features", "constant_features"):
+        quality_log[column] = quality_log[column].map(quality_filter_json)
+    quality_path = Path(oof_output_path).with_name(Path(oof_output_path).stem + "_quality_filter.csv")
+    quality_log.to_csv(quality_path, index=False, encoding="utf-8-sig")
 
     return oof_frame, threshold_frame, elapsed_seconds
 

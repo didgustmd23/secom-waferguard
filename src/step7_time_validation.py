@@ -20,7 +20,7 @@ try:
     from src.modeling_metrics import evaluate_binary_scores
     from src.step4_baseline import split_frame_to_xy
     from src.step6_feature_compare import build_experiments
-    from src.modeling_preprocessing import fitted_feature_count
+    from src.modeling_preprocessing import fitted_feature_count, quality_filter_record, quality_filter_json
     from src.split_contract import PROTOCOL_ID, validate_split_pair
     from src.step8_threshold_oof import validate_threshold_report
 except ModuleNotFoundError:
@@ -28,7 +28,7 @@ except ModuleNotFoundError:
     from modeling_metrics import evaluate_binary_scores
     from step4_baseline import split_frame_to_xy
     from step6_feature_compare import build_experiments
-    from modeling_preprocessing import fitted_feature_count
+    from modeling_preprocessing import fitted_feature_count, quality_filter_record, quality_filter_json
     from split_contract import PROTOCOL_ID, validate_split_pair
     from step8_threshold_oof import validate_threshold_report
 
@@ -142,6 +142,7 @@ def compare_time_validation(
                     pipeline, len(feature_columns)
                 ),
                 "fit_time_seconds": fit_seconds,
+                "quality_filter_log": quality_filter_json([quality_filter_record(pipeline)]),
                 **asdict(metrics),
             }
         )
