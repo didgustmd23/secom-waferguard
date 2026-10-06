@@ -183,7 +183,7 @@ def compare_temporal(frame, config, *, outer_splits=3, inner_splits=2,
     # 기존 모델 비교와 특징 선택 실험이 같은 시간 분할·평가 처리를 공유한다.
     pipelines = build_candidate_pipelines(config) if pipelines is None else pipelines
     if not oof_modes or len(set(oof_modes)) != len(oof_modes) or not set(oof_modes).issubset({"stratified_oof", "temporal_oof"}):
-        raise ValueError("内部 OOF 방식은 중복 없이 stratified_oof 또는 temporal_oof를 지정하세요.")
+        raise ValueError("내부 OOF 방식은 중복 없이 stratified_oof 또는 temporal_oof를 지정하세요.")
     unknown = set(model_names) - set(pipelines)
     if unknown:
         raise ValueError(f"지원하지 않는 시간 검증 모델입니다: {sorted(unknown)}")
