@@ -12,17 +12,16 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.base import clone
 
 try:
     from src.modeling_config import DEFAULT_CONFIG_PATH, ModelingConfig, load_modeling_config
-    from src.step4_baseline import split_frame_to_xy
-    from src.step6_feature_compare import build_experiments
+    from src.dataset_schema import split_frame_to_xy
+    from src.modeling_models import build_pipeline, fit_pipeline, positive_scores
     from src.split_contract import SOURCE_ROW_ID, validate_split_pair
 except ModuleNotFoundError:
     from modeling_config import DEFAULT_CONFIG_PATH, ModelingConfig, load_modeling_config
-    from step4_baseline import split_frame_to_xy
-    from step6_feature_compare import build_experiments
+    from dataset_schema import split_frame_to_xy
+    from modeling_models import build_pipeline, fit_pipeline, positive_scores
     from split_contract import SOURCE_ROW_ID, validate_split_pair
 
 
@@ -42,6 +41,11 @@ def assign_error_groups(
     positive_label: object,
     threshold: float,
 ) -> pd.Series:
+    """각 행을 TP·FN·FP·TN 사례로 분류한다.
+
+    입력 threshold는 이미 OOF에서 선택한 값을 사용하며, 이 함수에서는
+    threshold를 다시 탐색하지 않는다. 결과는 오분류 패턴 진단에 사용한다.
+    """
     # threshold 검증을 먼저 수행해 잘못된 분류 그룹을 만들지 않는다.
     if not 0.0 <= threshold <= 1.0:
         raise ValueError("오류 분석 threshold는 0.0 이상 1.0 이하여야 합니다.")
@@ -68,6 +72,7 @@ def assign_error_groups(
 # - FP는 표본 수가 작을 수 있으므로 절대값을 과도하게 해석하지 않는다.
 # ==========================================
 def _standardized_mean_difference(left: pd.Series, right: pd.Series) -> float:
+    """두 집단의 평균 차이를 pooled 표준편차 단위로 계산한다."""
     # 결측값은 제외하고 두 그룹의 평균 차이를 공통 표준편차로 나눈다.
     left_values = left.dropna().to_numpy(dtype=float)
     right_values = right.dropna().to_numpy(dtype=float)
@@ -89,6 +94,7 @@ def summarize_error_groups(
     cases: pd.DataFrame,
     features: pd.DataFrame,
 ) -> pd.DataFrame:
+    """오류 그룹별 표본 수·예측 점수·행 단위 결측률을 요약한다."""
     # 사례와 feature 행이 어긋나면 결측률 요약이 잘못되므로 먼저 차단한다.
     if len(cases) != len(features):
         raise ValueError("오류 사례와 feature 행 수가 일치해야 합니다.")
@@ -121,6 +127,12 @@ def compare_error_features(
     error_groups: pd.Series,
     drift_report: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
+    """오류 그룹별 센서 분포 차이를 탐색적으로 정리한다.
+
+    FN과 TN의 차이는 놓친 불량의 특성을 살피기 위한 단서이고, FP 비교는
+    오검출 양상을 살피기 위한 단서다. 이 표만으로 인과성이나 자동 제거를
+    결론내리지 않으며, drift 정보가 있으면 함께 표시한다.
+    """
     if len(features) != len(error_groups):
         raise ValueError("feature와 오류 그룹의 행 수가 일치해야 합니다.")
 
@@ -188,7 +200,14 @@ def analyze_time_validation_errors(
     threshold: float,
     drift_report: pd.DataFrame | None = None,
     n_jobs: int = 1,
+    experiment_name: str = EXPERIMENT_NAME,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Time Validation 예측을 사례 분류·그룹 요약·특징 비교로 분석한다.
+
+    모델은 Time Train에서만 학습하고 전달된 threshold를 그대로 사용한다.
+    반환값은 행별 예측 사례, 그룹 요약, 특징 차이 표 순서이며 drift 표는
+    특징 차이를 해석할 때 참고 정보로 결합한다.
+    """
     validate_split_pair(train_frame, validation_frame, config.dataset, temporal=True)
     train_x, train_y, feature_columns = split_frame_to_xy(train_frame, config.dataset)
     validation_x, validation_y, _ = split_frame_to_xy(
@@ -199,20 +218,15 @@ def analyze_time_validation_errors(
     if train_y.nunique() < 2:
         raise ValueError("Time Train split에는 정상과 Fail label이 모두 있어야 합니다.")
 
-    pipeline = clone(build_experiments(config, n_jobs=n_jobs)[EXPERIMENT_NAME])
-    pipeline.fit(train_x, train_y)
-    model = pipeline.named_steps["model"]
-    class_positions = [
-        index
-        for index, label in enumerate(model.classes_)
-        if label == config.dataset.positive_label
-    ]
-    if len(class_positions) != 1:
-        raise ValueError("학습된 LightGBM에서 Profile의 Fail label을 찾을 수 없습니다.")
-    positive_scores = pipeline.predict_proba(validation_x)[:, class_positions[0]]
+    # 호출자가 OOF에서 사전 선택한 모델을 Train에서만 학습한다.
+    pipeline = fit_pipeline(
+        build_pipeline(config, experiment_name, n_jobs=n_jobs),
+        train_x, train_y, config, experiment_name, n_jobs=n_jobs,
+    )
+    scores = positive_scores(pipeline, validation_x, config.dataset)
     error_groups = assign_error_groups(
         validation_y,
-        positive_scores,
+        scores,
         positive_label=config.dataset.positive_label,
         threshold=threshold,
     )
@@ -223,7 +237,7 @@ def analyze_time_validation_errors(
             "source_row_index": validation_frame.index,
             "source_row_id": validation_frame[SOURCE_ROW_ID].to_numpy() if SOURCE_ROW_ID in validation_frame else None,
             "label": validation_y.to_numpy(),
-            "positive_score": positive_scores,
+            "positive_score": scores,
             "threshold": threshold,
             "error_group": error_groups.to_numpy(),
         }
@@ -252,7 +266,9 @@ def analyze_time_validation_errors_from_files(
     feature_output_path: Path | str,
     drift_report_path: Path | str | None = None,
     n_jobs: int = 1,
+    experiment_name: str = EXPERIMENT_NAME,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """설정과 분할 파일을 읽어 시간 검증 오류 분석을 수행하고 저장한다."""
     # drift report는 선택 입력이며, 전달된 경우에만 feature 비교 결과와 결합한다.
     drift_report = None
     if drift_report_path is not None:
@@ -268,6 +284,7 @@ def analyze_time_validation_errors_from_files(
         threshold=threshold,
         drift_report=drift_report,
         n_jobs=n_jobs,
+        experiment_name=experiment_name,
     )
     for frame, output_path in (
         (cases, cases_output_path),
@@ -281,6 +298,7 @@ def analyze_time_validation_errors_from_files(
 
 
 def _parse_arguments() -> argparse.Namespace:
+    """오류 분석 입력 파일, 고정 threshold, 출력 위치를 CLI에서 읽는다."""
     # threshold는 필수 인자로 받아 Time Validation에서 임의 탐색하지 않게 한다.
     parser = argparse.ArgumentParser(description="Time Validation FN/FP 사례 분석")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
@@ -300,10 +318,13 @@ def _parse_arguments() -> argparse.Namespace:
         "--feature-output", type=Path, default=Path("logs/time_validation_error_features.csv")
     )
     parser.add_argument("--n-jobs", type=int, default=1)
+    parser.add_argument("--experiment", default=EXPERIMENT_NAME,
+                        help="OOF에서 사전 선택한 실험 이름입니다.")
     return parser.parse_args()
 
 
 def main() -> None:
+    """명령행 진입점으로 오류 분석을 실행하고 산출 경로를 안내한다."""
     # 사례·요약·feature 비교 로그를 저장하고 콘솔에는 검토용 요약만 표시한다.
     arguments = _parse_arguments()
     _, summary, features = analyze_time_validation_errors_from_files(
@@ -316,6 +337,7 @@ def main() -> None:
         feature_output_path=arguments.feature_output,
         drift_report_path=arguments.drift_report,
         n_jobs=arguments.n_jobs,
+        experiment_name=arguments.experiment,
     )
     print("오류 그룹 요약")
     print(summary.to_string(index=False))

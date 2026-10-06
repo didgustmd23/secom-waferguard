@@ -1,0 +1,3 @@
+# 결과 확인용 노트북의 선택 의존성
+-r requirements.txt
+ipykernel

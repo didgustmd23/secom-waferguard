@@ -5,7 +5,9 @@
 # - 시간 검증은 Train의 최종 시각보다 뒤에 있는 구간만 허용
 # ==========================================
 
+import numpy as np
 import pandas as pd
+from sklearn.model_selection import TimeSeriesSplit
 
 SOURCE_ROW_ID = "__source_row_id"
 SPLIT_ROLE = "__split_role"
@@ -14,6 +16,7 @@ SPLIT_METADATA = (SOURCE_ROW_ID, SPLIT_ROLE, PROTOCOL_ID)
 
 
 def validate_train_role(frame):
+    """학습 입력의 split 역할·행 식별자·생성 계약 metadata를 검증한다."""
     present = set(frame.columns) & set(SPLIT_METADATA)
     if present and present != set(SPLIT_METADATA):
         raise ValueError("split metadata는 원본 ID·역할·생성 계약을 모두 포함해야 합니다.")
@@ -31,6 +34,12 @@ def validate_train_role(frame):
 
 
 def validate_split_pair(train, validation, dataset, *, temporal=False):
+    """Train/Validation 간 출처, 행·그룹 중복 및 시간 누수를 검사한다.
+
+    split metadata가 있는 새 형식과 metadata가 없는 기존 CSV를 모두
+    처리한다. ``temporal=True``이면 Train 종료 시각이 Validation 시작보다
+    반드시 앞서는지도 확인한다.
+    """
     if train.empty or validation.empty:
         raise ValueError("Train과 Validation split은 비어 있으면 안 됩니다.")
     # 같은 생성 계약의 Train과 Validation인지 먼저 확인한다.
@@ -82,6 +91,12 @@ def validate_split_pair(train, validation, dataset, *, temporal=False):
 # - 그룹 선언 시 같은 그룹이 학습·검증 fold 양쪽에 포함되지 않도록 분리
 # ==========================================
 def training_folds(features, labels, frame, config):
+    """설정에 따라 반복 계층 fold 또는 그룹 누수 방지 fold를 생성한다.
+
+    그룹 지정이 없으면 RepeatedStratifiedKFold를 사용하고, 그룹이 있으면
+    같은 그룹이 한 fold의 양쪽에 나뉘지 않도록 StratifiedGroupKFold를 쓴다.
+    반환되는 인덱스는 모든 모델·특징 실험에서 공통으로 재사용한다.
+    """
     from sklearn.model_selection import RepeatedStratifiedKFold, StratifiedGroupKFold
 
     cv = config.experiment.cv
@@ -108,3 +123,43 @@ def training_folds(features, labels, frame, config):
                     raise ValueError("그룹 CV fold에 두 label이 모두 없습니다. fold 수 또는 그룹 구성을 검토하세요.")
                 yield train_indices, valid_indices
     return grouped_folds()
+
+
+# ==========================================
+# timestamp 단위의 확장형 학습·평가 인덱스 생성
+# - 같은 시각과 선언된 그룹·복합 ID가 경계를 넘으면 허용하지 않음
+# - 입력 행 순서와 관계없이 시간 범위가 겹치지 않는지 검증
+# ==========================================
+def temporal_folds(frame, dataset, n_splits):
+    """시간 순서를 보존하며 확장형 train/validation 인덱스를 생성한다.
+
+    동일 timestamp의 행은 분리하지 않고, 각 평가 구간이 학습 구간보다
+    뒤에 있는지 확인한다. 무작위 분할로 미래 정보가 섞이는 것을 방지한다.
+    """
+    if dataset.timestamp_column is None:
+        raise ValueError("시간 검증에는 Dataset Profile의 timestamp 컬럼이 필요합니다.")
+    times = pd.to_datetime(frame[dataset.timestamp_column],
+                           format=dataset.timestamp_format, errors="coerce")
+    if times.isna().any():
+        raise ValueError("시간 검증 입력에 timestamp 파싱 실패 또는 결측값이 있습니다.")
+    unique_times = np.sort(times.unique())
+    if n_splits < 2 or len(unique_times) <= n_splits:
+        raise ValueError("시간 fold 수는 2 이상이며 고유 timestamp 수보다 작아야 합니다.")
+    folds = []
+    for fit_times, eval_times in TimeSeriesSplit(n_splits=n_splits).split(unique_times):
+        fit_i = np.flatnonzero(times.isin(unique_times[fit_times]).to_numpy())
+        eval_i = np.flatnonzero(times.isin(unique_times[eval_times]).to_numpy())
+        train = frame.iloc[fit_i]
+        evaluation = frame.iloc[eval_i].copy()
+        # 원본 Train의 부분집합을 내부 평가로 사용하므로 복사본의 역할만 변경한다.
+        if SPLIT_ROLE in evaluation:
+            evaluation[SPLIT_ROLE] = "validation"
+        validate_split_pair(train, evaluation, dataset, temporal=True)
+        if dataset.id_columns:
+            ids = list(dataset.id_columns)
+            if train[ids].isna().any().any() or evaluation[ids].isna().any().any():
+                raise ValueError("시간 검증의 ID 컬럼에 결측값이 있습니다.")
+            if set(map(tuple, train[ids].to_numpy())) & set(map(tuple, evaluation[ids].to_numpy())):
+                raise ValueError("시간 검증 학습·평가 구간에 동일한 복합 ID가 포함됩니다.")
+        folds.append((fit_i, eval_i))
+    return folds

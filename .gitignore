@@ -34,3 +34,9 @@ data/raw/
 # 재생성 가능한 split 생성 계약 (원본·설정으로 다시 생성)
 /data/splits/**/manifest.json
 
+# 재생성 가능한 평가 실행 상태와 설정 기록
+/logs/**/execution.json
+/logs/**/temporal_run.json
+/logs/**/anomaly_run.json
+/logs/**/feature_run.json
+

@@ -1,5 +1,11 @@
 {
   "dataset_profile": "configs/datasets/secom.json",
+  "threshold_policy": {
+    "min_recall": 0.9,
+    "max_reinspection_ratio": 0.2,
+    "selection_rule": "min_reinspection",
+    "on_infeasible": "report_only"
+  },
   "experiment": {
     "random_state": 42,
     "default_threshold": 0.5,
@@ -35,7 +41,8 @@
       "logistic_regression_l1",
       "rbf_svm",
       "random_forest",
-      "lightgbm"
+      "lightgbm",
+      "xgboost"
     ]
   }
 }

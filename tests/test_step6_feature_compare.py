@@ -2,6 +2,7 @@
 # 특징 선택 비교 테스트
 # - 작은 수치형 데이터에서 PCA·L1·LightGBM 선택 실험 결과를 생성하는지 확인
 # - 단일 class, 과도한 Top-K 설정을 실행 전 차단하는지 확인
+# - XGBoost 분류기를 유지한 채 센서 선택 방식만 달라지는지 확인
 # ==========================================
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from src.modeling_config import (
     MODELING_CONFIG,
 )
 from src.step6_feature_compare import compare_features
+from src.modeling_models import build_pipeline, fit_pipeline
 
 
 class FeatureComparisonTest(unittest.TestCase):
@@ -85,6 +87,50 @@ class FeatureComparisonTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "Top-K feature 수가 입력 feature 수보다 큽니다"):
             compare_features(self._frame(), invalid_config)
+
+    # ==========================================
+    # 전체·XGBoost 중요도·RF 중요도 비교의 공정성 검증
+    # - 최종 분류기 설정은 같고 선택용 모델만 다르게 구성
+    # - 작은 데이터의 Top-2 실행으로 fold별 결과와 센서 기록을 확인
+    # ==========================================
+    def test_xgboost_selectors_keep_same_classifier(self) -> None:
+        names = ("xgboost_all", "xgboost_top_2", "xgboost_rf_top_2")
+        pipelines = [build_pipeline(self.config, name) for name in names]
+        expected = pipelines[0].named_steps["model"].get_params()
+        for pipeline in pipelines[1:]:
+            self.assertEqual(pipeline.named_steps["model"].get_params(), expected)
+        self.assertEqual(
+            pipelines[1].named_steps["selector"].estimator.importance_type, "gain",
+        )
+        self.assertEqual(
+            type(pipelines[2].named_steps["selector"].estimator).__name__,
+            "RandomForestClassifier",
+        )
+
+    def test_xgboost_comparison_records_each_fold(self) -> None:
+        names = ("xgboost_all", "xgboost_top_2", "xgboost_rf_top_2")
+        result = compare_features(self._frame(), self.config, experiment_names=names)
+        counts = result.set_index("experiment")["selected_feature_count_mean"]
+        self.assertEqual(counts.to_dict(), dict(zip(names, (3.0, 2.0, 2.0))))
+        self.assertEqual(len(result.attrs["fold_results"]), 6)
+        selected = result.attrs["selected_features"]
+        self.assertEqual(len(selected), 8)
+        self.assertTrue(selected["feature_space"].eq("raw_sensor").all())
+        self.assertTrue(selected.groupby(["experiment", "cv_fold"]).size().eq(2).all())
+
+    def test_xgboost_selection_ignores_heldout_values(self) -> None:
+        # 검증 데이터의 값이 아니라 학습 fold만으로 제거할 센서를 판단한다.
+        config = replace(self.config, dataset=replace(self.dataset, drop_zero_variance=True))
+        train = self._frame().assign(sensor_c=1.0)
+        features = train.drop(columns="target")
+        template = build_pipeline(config, "xgboost_top_2")
+        model = fit_pipeline(template, features, train["target"], config, "xgboost_top_2")
+        # 검증 입력에 변동이 있어도 학습 시 값이 하나뿐이었던 센서는 복원하지 않는다.
+        heldout = features.assign(sensor_c=range(len(features)))
+        model.predict_proba(heldout)
+        self.assertNotIn("sensor_c", model.named_steps["quality_filter"].retained_features_)
+        self.assertEqual(model.named_steps["model"].n_features_in_, 2)
+        self.assertFalse(hasattr(template.named_steps["model"], "estimator_"))
 
 
 if __name__ == "__main__":

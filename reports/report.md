@@ -1,6 +1,8 @@
 # SECOM WaferGuard 중간 분석 보고서
 
-> 기준 시점: 기존 Step 9 탐색 결과, 교정된 Step 3 기반 Step 4~9 재실행 및 Time Train 내부 시간 순서 검증 완료. 아래 수치는 최종 Test 성능이 아니다.
+> 전처리 변경: 공통 Pipeline 앞단에 학습 데이터 기준 결측률 초과·상수 센서 제거와 제거 로그를 추가했다. 1~20절은 필터 적용 전의 탐색 기록이며, 필터 적용 후 Step 4~9 재실행 결과는 21절, 코드화한 시간순 내부 검증 결과는 22절에 기록했다.
+
+> 기준 시점: 2026-10-06 센서 품질 필터 적용 후 Step 4~9 및 Time Train 내부 시간순 검증 재실행 완료. XGBoost 추가 비교는 25절, XGBoost 센서 선택 방법별 Top-20 반복 CV 비교는 26절, 전체 vs RF Top-20 시간순 검증은 27절에 기록했다. 아래 수치는 최종 Test 성능이 아니다.
 
 > 평가 해석 정정: 기존 Time Validation 235행 중 163행이 Random Train에도 포함되어 후보 비교·OOF 탐색에 사용됐다. 아래 수치는 탐색 기록이며 독립적인 미사용 holdout 성능이 아니다. 새 실행 경로는 시간 holdout을 먼저 분리하고 동일한 Time Train만 사용한다. 기존 `0.000475`는 승계하지 않으며, 평균 OOF와 단일 재학습 모델의 확률 척도 차이도 있으므로 성능 하락을 drift만으로 단정하지 않는다. 이미 관찰한 데이터는 재분할해도 미사용 데이터가 되지 않는다.
 
@@ -345,3 +347,480 @@ Time Train 1,096행만 사용해 과거 구간을 학습하고 이후 구간을 
 - 이 F1 최대 탐색은 FP 비용이나 검사 용량을 반영하지 않는다. F1 후보를 적용한 결과 경보 비율은 모델·구간에 따라 크게 달랐다. 사용 가능한 검사 용량이 정의되지 않아 어느 threshold도 운영 후보로 확정하지 않는다.
 - 세 학습 구간과 겹치는 시간 사용 및 반복된 후보 검토를 고려하면 이 결과는 내부 개발 진단이다. 모델의 최종 일반화 성능으로 주장하지 않으며 Time Validation/Test 성능도 대체하지 않는다.
 - 결과는 메모리에서 산출했으며 전용 스크립트·CSV를 만들지 않았다. 모델·threshold는 미확정 상태다. 다음 의사결정은 현장 재검사 용량 및 FN/FP 비용 기준을 정하는 것이다. 그런 기준이 생기면 각 과거 학습 구간에서 같은 제약을 사용해 threshold를 선택하고, 새로운 미사용 시간 구간으로 검증해야 한다.
+
+## 21. 센서 품질 필터 적용 후 재실행 (2026-10-06)
+
+### 실행 조건과 센서 제거 기록
+
+기존 `data/splits/integrated/time_train.csv` 1,096행(Fail 78행)과 `time_valid.csv` 235행(Fail 17행)을 그대로 사용했다. Step 4 Baseline, Step 5 후보 비교, Step 6 특징 비교, Step 8 단일 OOF, Step 7 시간 검증, Step 9 오류 분석을 재실행했다. 시간순 내부 진단인 18~20절은 이번에 재실행하지 않았다. 외부 시간 검증 구간은 이미 관찰한 개발용 구간이며 Test는 평가하지 않았다.
+
+모든 Pipeline은 품질 필터를 학습 데이터에서 fit한 뒤 결측 대치와 필요한 scaling·특징 선택을 수행했다. 전체 Time Train과 반복 CV 375개 학습 기록(후보 6개·특징 실험 9개 × 25 folds), 단일 OOF 5개 학습 fold에서 동일하게 결측률 50% 초과 센서 24개와 남은 센서 중 상수 122개를 제거했다. 원래 590개 센서 중 146개를 제거해 **444개**를 유지했다. 이 개수는 전체 데이터 EDA의 후보 수 28개·116개와 구별한다.
+
+반복 CV는 5 folds × 5 repeats, seed 42, 비교 threshold 0.50을 유지했다. OOF는 동일한 Train의 단일 5-fold 예측이며, 1,096개 샘플마다 예측이 정확히 한 번 생성됐음을 확인했다. 실행 환경은 Python 3.10.22, scikit-learn 1.5.2, LightGBM 4.5.0이다. Step 6·7·8·9의 LightGBM 내부 병렬 처리 수는 2였다. 동시 실행했으므로 학습 시간은 이전 실행과 직접 비교하지 않는다.
+
+### 후보 모델 비교
+
+| 모델 | 필터 전 CV AP | 필터 후 CV AP 평균 ± 표준편차 | Recall @ 0.50 | ROC-AUC 평균 |
+| --- | ---: | ---: | ---: | ---: |
+| LightGBM | 0.2360 | 0.2424 ± 0.0665 | 0.0027 | 0.7628 |
+| LightGBM scale_pos_weight | 0.2285 | 0.2374 ± 0.0692 | 0.0153 | 0.7523 |
+| Random Forest | 0.2323 | 0.2324 ± 0.0590 | 0.0025 | 0.7531 |
+| RBF SVM | 0.1758 | 0.1716 ± 0.0361 | 0.0000 | 0.6880 |
+| L1 Logistic Regression | 0.1762 | 0.1690 ± 0.0493 | 0.1637 | 0.6576 |
+| L1 Logistic Regression balanced | 0.1726 | 0.1688 ± 0.0489 | 0.2510 | 0.6514 |
+
+LightGBM 계열의 AP는 높아졌지만 모든 후보가 개선된 것은 아니다. AP 평균 차이는 기술적인 비교이며 통계적 유의성을 확인한 결론은 아니다. 비교 threshold 0.50에서의 불량 검출은 여전히 제한적이다.
+
+### 특징 축소 비교
+
+| 실험 | 평균 특징 수 | 필터 전 CV AP | 필터 후 CV AP 평균 ± 표준편차 | Recall @ 0.50 |
+| --- | ---: | ---: | ---: | ---: |
+| LightGBM 품질 필터 후 전체 | 444.00 | 0.2360 | 0.2424 ± 0.0665 | 0.0027 |
+| LightGBM Top-100 | 100.00 | 0.2302 | 0.2407 ± 0.0709 | 0.0182 |
+| LightGBM Top-50 | 50.00 | 0.2202 | 0.2353 ± 0.0681 | 0.0363 |
+| LightGBM Top-30 | 30.00 | 0.2259 | 0.2117 ± 0.0653 | 0.0282 |
+| LightGBM Top-20 | 20.00 | 0.2154 | 0.2042 ± 0.0784 | 0.0390 |
+| LightGBM Top-10 | 10.00 | 0.1975 | 0.1872 ± 0.0603 | 0.0437 |
+| L1 balanced + L1 선택 | 181.16 | 0.1725 | 0.1689 ± 0.0489 | 0.2510 |
+| L1 balanced 품질 필터 후 전체 | 444.00 | 0.1726 | 0.1688 ± 0.0489 | 0.2510 |
+| L1 balanced + PCA90 | 121.08 | 0.1280 | 0.1393 ± 0.0410 | 0.3335 |
+
+`lightgbm_all`과 `l1_balanced_all`의 all은 품질 필터 후 남은 센서 전체를 뜻한다. PCA의 특징 수는 센서 수가 아닌 성분 수다. Top-50은 원래 590개 센서의 1/10 이하이고 AP 평균이 전체 방식에 비교적 가까웠지만, 별도의 시간 검증이나 성능 동등성 검증을 수행한 것은 아니다. Top-20의 AP 평균은 전체 방식보다 약 0.038 낮아 동일 성능을 유지했다고 주장하지 않는다.
+
+### OOF threshold와 시간 검증
+
+새 LightGBM 단일 OOF의 AP는 **0.1930**, ROC-AUC는 **0.7479**였다. 기존과 동일하게 101개 분위수와 0.50을 합한 102개 후보에서 F1 최대값을 비교했다. 선택한 탐색 후보는 **0.00037729474027866034**이며, 새 비교표의 출처 검사를 통과한 뒤 반올림하지 않은 값을 Time Validation에 적용했다. 이는 현장 Recall 목표·검사 용량을 반영한 최종 threshold가 아니다.
+
+| 평가 구간·모델 | threshold | AP | ROC-AUC | Recall | Precision | TP | FP | FN | TN |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Time Validation Baseline | 0.50 | 0.0683 | 0.4741 | 0.0000 | 0.0000 | 0 | 2 | 17 | 216 |
+| Time Validation LightGBM | 0.50 | 0.1110 | 0.6576 | 0.0000 | 0.0000 | 0 | 0 | 17 | 218 |
+| Time Validation L1 balanced 선택 | 0.50 | 0.0668 | 0.4544 | 0.0000 | 0.0000 | 0 | 8 | 17 | 210 |
+| Train OOF LightGBM, 격자 내 F1 최대 후보 | 0.00037729474027866034 | 0.1930 | 0.7479 | 0.3462 | 0.2231 | 27 | 94 | 51 | 924 |
+| Time Validation LightGBM, 같은 OOF 후보 | 0.00037729474027866034 | 0.1110 | 0.6576 | 0.0000 | 0.0000 | 0 | 3 | 17 | 215 |
+
+OOF 후보의 F1은 0.2714이며 양성 판정 비율은 약 11.0%였다. 이는 threshold 탐색에 사용한 데이터의 수치로, 독립 성능 추정치가 아니다. 시간 검증 AP는 필터 전 0.0874에서 0.1110으로 높아졌지만, 새 OOF threshold로는 불량 17건을 모두 놓쳤다. 품질 필터 요구사항을 반영한 것과 조기 탐지 성능을 확보한 것은 구별해야 한다. 최종 모델·threshold는 여전히 미확정이다.
+
+Step 9 오류 요약은 TP 0·FP 3·FN 17·TN 215로 시간 검증 결과와 일치했다. 오류 특징 비교와 행 결측률은 원래 590개 센서의 진단 정보이며, 제거 후 모델 입력 444개만의 통계가 아니다. 원본 split이 같으므로 기존 `logs/integrated/temporal_drift_report.csv`를 참고 정보로 재사용했다. 이 진단을 근거로 Validation에서 threshold를 다시 선택하지 않았다.
+
+### 저장한 결과
+
+새 결과는 `logs/quality_filtered_20261006/`에 저장해 기존 `logs/integrated/` 결과를 보존했다. 주요 파일은 `baseline.csv`, `model_compare.csv`, `feature_compare.csv`, `oof_predictions.csv`, `threshold_compare.csv`, `time_validation.csv`, `time_validation_oof_threshold.csv`, `error_cases.csv`, `error_summary.csv`, `error_features.csv`다. 학습별 제거 개수·센서명은 각 결과의 `quality_filter_log`, OOF는 `oof_predictions_quality_filter.csv`에 기록했다.
+
+## 22. 코드화한 시간순 내부 검증 — 센서 필터 적용 후
+
+### 평가 방법과 재현 명령
+
+`src/temporal_validation.py`를 추가해 18~20절의 진단을 재생성 가능한 실험으로 정리했다. 동일한 Time Train 1,096행에서 timestamp 단위 `TimeSeriesSplit(n_splits=3)`로 아래 세 외부 구간을 만들었다. 정상·Fail 표본 수와 외부 경계는 기존 진단과 같으며, 외부 Time Validation과 Test는 읽지 않았다.
+
+```powershell
+python src/temporal_validation.py --train data/splits/integrated/time_train.csv --output-dir logs/temporal_validation_run --n-jobs 2
+```
+
+출력 폴더는 비어 있어야 한다. 확정 실행 결과는 `logs/temporal_quality_filtered_20261006_final/`에 저장했다. LightGBM·LightGBM scale_pos_weight·Random Forest·L1 Logistic Regression balanced의 공통 Pipeline을 사용했고, 센서 제거·대치·scaling은 각 학습 구간에서만 fit했다. LightGBM 불량 가중치는 해당 학습 구간에서 계산했다.
+
+같은 외부 학습 모델의 예측 점수에 다음 세 threshold 방식을 적용했다.
+
+- `default`: 설정의 0.50.
+- `stratified_oof`: 각 과거 학습 구간 내부의 단일 계층 5-fold OOF에서 F1 최대 후보 선택.
+- `temporal_oof`: 각 과거 학습 구간 내부의 timestamp 단위 확장형 2-fold OOF에서 F1 최대 후보 선택.
+
+OOF 후보는 동일한 101개 분위수와 0.50의 중복을 제거한 최대 102개 값이다. 이후 평가 구간의 label은 threshold 선택에 사용하지 않았다. 시간순 OOF의 초기 미예측 행은 제외했으며 0점으로 채우지 않았다. 내부 시간순 경계·제외 범위를 코드로 명시했으므로, 과거 메모리 진단과의 차이를 센서 제거 하나의 효과로 단정하지 않는다.
+
+### 시간 구간과 OOF 대상 수
+
+| 구간 | 학습 행 / Fail | 평가 행 / Fail | 학습 종료 | 평가 시작 | 계층 OOF 행 | 시간순 OOF 행 | 초기 제외 행 |
+| --- | --- | --- | --- | --- | ---: | ---: | ---: |
+| 1 | 272 / 39 | 279 / 22 | 2008-08-18 15:41 | 2008-08-18 16:19 | 272 | 181 | 91 |
+| 2 | 551 / 61 | 273 / 8 | 2008-08-29 22:56 | 2008-08-30 00:01 | 551 | 369 | 182 |
+| 3 | 824 / 69 | 272 / 9 | 2008-09-13 09:19 | 2008-09-13 10:55 | 824 | 552 | 272 |
+
+외부 학습의 센서 제거는 1구간에서 결측률 초과 20개·상수 122개로 잔여 448개, 2·3구간에서 결측률 초과 24개·상수 122개로 잔여 444개였다. 내부 OOF의 제거 기록도 각 내부 학습 데이터에서 따로 계산해 저장했다.
+
+### 기본 threshold 0.50의 구간별 평균
+
+| 모델 | AP 평균 ± 구간 표준편차 | ROC-AUC 평균 | Recall 평균 | 합산 TP | 합산 FP | 합산 FN |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Random Forest | 0.1561 ± 0.0798 | 0.5332 | 0.0000 | 0 | 1 | 39 |
+| LightGBM | 0.1233 ± 0.0886 | 0.5710 | 0.0000 | 0 | 2 | 39 |
+| LightGBM scale_pos_weight | 0.1201 ± 0.0912 | 0.5722 | 0.0152 | 1 | 4 | 38 |
+| L1 Logistic Regression balanced | 0.0811 ± 0.0323 | 0.5605 | 0.2378 | 9 | 206 | 30 |
+
+AP 평균과 표준편차는 서로 다른 세 시간 구간의 기술 통계이며 신뢰구간이나 반복 CV의 통계와 동일하지 않다. 기본 threshold에서도 L1은 검출과 오탐을 함께 늘렸고, AP가 높은 Random Forest는 Fail을 검출하지 못했다.
+
+### 시간순 OOF threshold의 다음 구간 결과
+
+아래 threshold는 표시용 반올림값이며 정확한 값은 `fold_results.csv`에 저장했다.
+
+| 구간 | 모델 | threshold | Recall | Precision | TP | FP | FN | TN |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | LightGBM | 2.0652e-7 | 0.9545 | 0.0766 | 21 | 253 | 1 | 4 |
+| 1 | LightGBM scale_pos_weight | 1.7045e-7 | 0.9545 | 0.0775 | 21 | 250 | 1 | 7 |
+| 1 | Random Forest | 0.103333 | 0.9091 | 0.0797 | 20 | 231 | 2 | 26 |
+| 1 | L1 balanced | 0.000385867 | 0.8636 | 0.0748 | 19 | 235 | 3 | 22 |
+| 2 | LightGBM | 0.005648696 | 0.0000 | 0.0000 | 0 | 2 | 8 | 263 |
+| 2 | LightGBM scale_pos_weight | 0.001264474 | 0.0000 | 0.0000 | 0 | 15 | 8 | 250 |
+| 2 | Random Forest | 0.030000 | 1.0000 | 0.0296 | 8 | 262 | 0 | 3 |
+| 2 | L1 balanced | 0.000406272 | 0.8750 | 0.0303 | 7 | 224 | 1 | 41 |
+| 3 | LightGBM | 0.002645452 | 0.2222 | 0.2857 | 2 | 5 | 7 | 258 |
+| 3 | LightGBM scale_pos_weight | 5.8395e-6 | 0.6667 | 0.0545 | 6 | 104 | 3 | 159 |
+| 3 | Random Forest | 0.281433 | 0.2222 | 1.0000 | 2 | 0 | 7 | 263 |
+| 3 | L1 balanced | 0.095826 | 0.2222 | 0.0222 | 2 | 88 | 7 | 175 |
+
+### OOF 방식별 오탐 부담
+
+| 모델 | OOF 방식 | 합산 Recall | 합산 Precision | 양성 판정 비율 | TP | FP | FN | TN |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| LightGBM | 계층 | 0.3333 | 0.0619 | 25.5% | 13 | 197 | 26 | 588 |
+| LightGBM | 시간순 | 0.5897 | 0.0813 | 34.3% | 23 | 260 | 16 | 525 |
+| LightGBM scale_pos_weight | 계층 | 0.2051 | 0.0584 | 16.6% | 8 | 129 | 31 | 656 |
+| LightGBM scale_pos_weight | 시간순 | 0.6923 | 0.0682 | 48.1% | 27 | 369 | 12 | 416 |
+| Random Forest | 계층 | 0.5385 | 0.0585 | 43.6% | 21 | 338 | 18 | 447 |
+| Random Forest | 시간순 | 0.7692 | 0.0574 | 63.5% | 30 | 493 | 9 | 292 |
+| L1 balanced | 계층 | 0.4872 | 0.0594 | 38.8% | 19 | 301 | 20 | 484 |
+| L1 balanced | 시간순 | 0.7179 | 0.0487 | 69.8% | 28 | 547 | 11 | 238 |
+
+세 구간의 평가 표본은 824행(Fail 39행)이다. 합산 지표는 구간별로 다른 모델 학습·threshold를 적용한 오류 건수를 합친 값이며 하나의 고정 모델·threshold 성능이 아니다. 같은 외부 모델 점수를 사용하므로 threshold 방식에 따라 AP·ROC-AUC는 변하지 않는다.
+
+시간순 OOF 방식에서 Recall이 높아진 모델은 양성 판정 비율도 34~70%로 높았다. LightGBM은 1구간 Recall 0.9545에서 2구간 0으로 떨어졌고, Random Forest는 2구간 정상 265건 중 262건을 양성 판정해 Recall 1.0을 얻었다. 3구간 Random Forest의 Precision 1.0은 검출 2건·오탐 0건이라는 작은 표본의 결과다. 이런 수치를 근거로 안정적인 운영 성능이나 단일 최종 후보를 확정하지 않는다.
+
+### 검증·산출물·다음 결정
+
+전체 96개 자동 테스트가 통과했다. 저장한 96개 학습 기록의 시간 경계·제거 수 합계, 10,996개 OOF 기록의 모델·구간·방식별 행 중복 및 확률 범위, 9,888개 평가 예측 기록을 확인했다. 예측 기록 수에는 같은 평가 행을 네 모델·세 방식으로 비교한 중복 표현이 포함되며, 서로 다른 평가 행 수는 824다.
+
+출력은 `folds.csv`, `fold_results.csv`, `summary.csv`, `predictions.csv`, `oof_predictions.csv`, `oof_coverage.csv`, `threshold_compare.csv`, `quality_filter.csv`, `temporal_run.json`이다. 코드·실행 조건·구간별 모델 파라미터·품질 제거 사유를 함께 남겼다.
+
+담당 B의 시간순 내부 검증 작업은 완료했다. 다음 필수 작업은 목표 Recall 또는 허용 재검사 비율을 공동으로 정하고 그 조건으로 OOF threshold 후보를 비교하는 것이다. 현재 F1 최대값은 검사 용량을 반영하지 않은 탐색 후보이며 최종 모델·threshold는 미확정이다.
+
+## 23. 정상 전용 이상 탐지 비교 (2026-10-06)
+
+### 실행과 평가 조건
+
+`src/anomaly_compare.py`로 Isolation Forest와 PCA 복원오차를 비교했다. 입력은 기존 Time Train 1,096행이며 22절과 같은 세 외부 시간 구간(평가 279·273·272행, Fail 22·8·9행)을 사용했다. 외부 Validation과 최종 Test는 읽지 않았다.
+
+```powershell
+python src/anomaly_compare.py --train data/splits/integrated/time_train.csv --output-dir logs/anomaly_run --supervised-dir logs/temporal_quality_filtered_20261006_final --n-jobs 2
+```
+
+명령의 출력 폴더는 새 폴더여야 한다. 이번 실제 실행 폴더는 `logs/anomaly_20261006/`이다. 지도학습 비교 로그의 Train 생성 계약·학습 설정·외부 기간 및 표본 수·내부 시간 fold 수를 확인했다.
+
+- 학습 데이터에서 정상만 추출하고 센서 품질 필터·대치·scaling·모델까지 정상만 fit했다. 불량은 OOF·다음 구간 평가의 정답에만 사용한다.
+- Isolation Forest는 200개 트리, `contamination="auto"`, seed 42로 학습했다. 원본 `score_samples`의 부호를 뒤집어 클수록 이상으로 통일했다.
+- PCA는 정상 데이터의 누적 설명분산 90%를 보존하고 표준화된 입력과 복원값의 평균 제곱 오차를 이상 점수로 사용했다.
+- 이상 점수는 불량 확률이 아니므로 확률 threshold 0.5를 적용하거나 평가 데이터로 0~1 정규화하지 않았다. 원본 점수의 OOF 분위수와 전체 미선별 후보를 비교했다.
+- 각 외부 학습 구간 내부에서 시간순 OOF 2구간을 생성했다. 초기 미예측 행은 91·182·272행 제외했고 OOF 대상 수는 181·369·552행이었다.
+- 현재 `config.json`의 Recall 최소 90%·재검사 최대 20% 정책은 그대로 사용했다. 조건 미충족이면 정책 threshold를 만들지 않으며, 별도로 F1 최대 진단 후보의 다음 구간 성능을 기록했다.
+
+### 동일 구간의 지도학습·이상 탐지 비교
+
+모든 아래 Recall·Precision·재검사 비율은 **과거 내부 시간순 OOF F1 최대 진단 후보**를 다음 구간에 적용한 합산 결과다. 정책 통과 결과가 아니며 구간마다 학습 모델과 threshold가 다르다. 세 구간 합계는 824행, 실제 Fail 39행이다. AP는 구간별 평균이고 AP 표준편차는 신뢰구간이 아니다.
+
+| 접근 | 모델 | 평균 AP | AP 표준편차 | 합산 Recall | 합산 Precision | 재검사 대상 비율 | TP | FP | FN |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 지도학습 | Random Forest | 0.1561 | 0.0798 | 0.7692 | 0.0574 | 63.5% | 30 | 493 | 9 |
+| 지도학습 | LightGBM | 0.1233 | 0.0886 | 0.5897 | 0.0813 | 34.3% | 23 | 260 | 16 |
+| 지도학습 | LightGBM scale_pos_weight | 0.1201 | 0.0912 | 0.6923 | 0.0682 | 48.1% | 27 | 369 | 12 |
+| 이상 탐지 | Isolation Forest | 0.1083 | 0.0805 | 0.2051 | 0.0506 | 19.2% | 8 | 150 | 31 |
+| 이상 탐지 | PCA 복원오차 | 0.0924 | 0.0554 | 0.5897 | 0.0529 | 52.8% | 23 | 412 | 16 |
+| 지도학습 | L1 balanced | 0.0811 | 0.0323 | 0.7179 | 0.0487 | 69.8% | 28 | 547 | 11 |
+
+### 이상 탐지의 구간별 결과
+
+| 구간 | 모델 | 진단 threshold | AP | Recall | 재검사 대상 비율 | TP | FP | FN |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | Isolation Forest | 0.465151 | 0.0574 | 0.0000 | 2.2% | 0 | 6 | 22 |
+| 2 | Isolation Forest | 0.416782 | 0.2220 | 0.6250 | 29.3% | 5 | 75 | 3 |
+| 3 | Isolation Forest | 0.421063 | 0.0457 | 0.3333 | 26.5% | 3 | 69 | 6 |
+| 1 | PCA 복원오차 | 0.330096 | 0.0871 | 0.6364 | 77.4% | 14 | 202 | 8 |
+| 2 | PCA 복원오차 | 0.317134 | 0.1628 | 0.7500 | 35.2% | 6 | 90 | 2 |
+| 3 | PCA 복원오차 | 0.268513 | 0.0274 | 0.3333 | 45.2% | 3 | 120 | 6 |
+
+표의 threshold는 표시용으로 반올림했으며 실행에는 CSV 원본 값을 사용한다. 두 모델 모두 구간별 점수와 성능의 변동이 컸다. Isolation Forest는 1구간 불량 22건을 모두 놓쳤고 PCA는 1구간 전체의 77.4%를 추가 검사 대상으로 지정했다. PCA의 합산 검출 건수는 LightGBM과 동일한 23건이지만 추가 검사 정상은 412건으로 LightGBM의 260건보다 많았다. 이번 설정만으로는 이상 탐지가 지도학습의 한계를 해결했다는 근거가 없다. 작은 Fail 표본에서 특정 구간의 높은 AP만으로 우수성을 확정하지 않는다.
+
+### 정책·누수 검증·한계
+
+현재 90%·20% 정책은 두 모델 × 세 과거 학습 구간의 내부 OOF에서 모두 미충족이었다. `policy_selection.csv`의 threshold는 비어 있고 정책 기반 다음 구간 평가는 생성하지 않았다. 이는 `fold_results.csv`의 F1 진단 threshold 존재와 모순되지 않는다.
+
+총 18개 fit의 불량 학습 건수는 모두 0이며, 실제 정상 학습 ID·기간·표본 수를 저장했다. 외부 fit의 정상 수는 233·490·755행, 센서 수는 448·444·444개, PCA 성분 수는 88·106·117개였다. OOF 기록 2,204행과 외부 점수 기록 1,648행은 각각 두 모델의 예측을 합한 수다. 모든 fit 기간이 다음 평가 시작보다 앞서고, 품질 제거 개수 합계와 정상 학습 ID를 확인했다. 전체 108개 자동 테스트가 통과했으며 불량 센서값 변경이 학습 결과에 영향을 주지 않는지, 미래 정답 변경이 OOF·threshold 선택을 바꾸지 않는지도 검사했다.
+
+센서·scaling·PCA가 학습 구간마다 달라지므로 원본 이상 점수의 규모도 달라질 수 있다. 여러 내부 fit의 OOF 점수로 선택한 문턱을 다음 fit에 적용하는 것은 전이 가능성 진단이며 안정적인 확률 보정이나 운영 기준을 뜻하지 않는다. 정상에서 벗어난 패턴이 반드시 Fail인 것도 아니다.
+
+산출물은 `folds.csv`, `fold_results.csv`, `summary.csv`, `predictions.csv`, `oof_predictions.csv`, `oof_coverage.csv`, `threshold_compare.csv`, `policy_selection.csv`, `quality_filter.csv`, `anomaly_compare.csv`, `anomaly_run.json`이다. `reports/analysis.ipynb` 6절에서 표·그래프를 확인한다. MLP·Autoencoder는 이번 구현에 포함하지 않았으며 딥러닝 교과 확장으로 별도 비교가 필요하다. 최종 모델·정책·threshold는 아직 미확정이다.
+
+## 24. 시간순 센서 축소와 선택 안정성 (2026-10-06)
+
+### 비교 조건과 실행
+
+`src/feature_time_compare.py`로 전체 특징과 Top-50·Top-20을 22~23절과 같은 외부 시간 구간 3개에서 비교했다. 각 과거 학습 구간 내부의 시간순 OOF 2구간으로 threshold를 선택했다. 공통 시간 검증 코어를 재사용하므로 시간 경계·초기 제외·정책 선택 규칙은 동일하다. 외부 Validation·Test는 읽지 않았다.
+
+```powershell
+python src/feature_time_compare.py --train data/splits/integrated/time_train.csv --output-dir logs/feature_time_run --n-jobs 2
+```
+
+실제 산출물은 `logs/feature_time_20261006/`에 저장했다. 기존 결과를 보존하려면 실행 시 새 출력 폴더를 지정한다.
+
+모든 분류기는 seed 42·트리 300개의 같은 LightGBM이다. 선택 방법만 LightGBM 중요도와 원본 과제의 RF 중요도로 바꿨다. RF 중요도 실험은 Random Forest 분류기 실험과 달리 **RF 선택기 → LightGBM 분류기**다. RF 선택기도 트리 300개·seed 42이며 기본 불균형 가중치를 유지했다. 이렇게 분류기를 통일해 선택 방법 차이를 비교했다. 품질 필터·대치·선택기는 학습 fold 안에서만 fit했다.
+
+전체 특징 수는 외부 구간별 448·444·444개이며 전체 Time Train의 품질 필터 결과는 444개다. 444개를 미리 전역 고정해 모든 과거 구간에 적용하지 않았다. 범주형 데이터에서는 One-Hot 특징 수가 원본 센서 수와 다를 수 있으나 이번 SECOM 기록은 원본 센서명 기준이다.
+
+### 같은 시간 구간의 성능 비교
+
+다음 Recall·Precision·재검사 비율은 **각 과거 구간 내부 OOF의 F1 최대 진단 후보**를 다음 구간에 적용한 합산 결과다. 현재 90%·20% 정책을 충족한 최종 성능이 아니다. AP는 구간별 평균이고 표준편차는 신뢰구간이 아니다. 평가 합계는 824행·Fail 39행이다.
+
+| 선택 방법 | 특징 수 | 평균 AP | AP 표준편차 | 합산 Recall | 합산 Precision | 재검사 대상 비율 | TP | FP | FN |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 전체 | 448/444/444 | 0.1233 | 0.0886 | 0.5897 | 0.0813 | 34.3% | 23 | 260 | 16 |
+| LightGBM 중요도 | 50 | 0.0857 | 0.0479 | 0.6923 | 0.0682 | 48.1% | 27 | 369 | 12 |
+| LightGBM 중요도 | 20 | 0.1081 | 0.0500 | 0.3333 | 0.0660 | 23.9% | 13 | 184 | 26 |
+| RF 중요도 | 50 | 0.1006 | 0.0403 | 0.5897 | 0.0488 | 57.2% | 23 | 448 | 16 |
+| RF 중요도 | 20 | 0.1038 | 0.0633 | 0.4615 | 0.0534 | 40.9% | 18 | 319 | 21 |
+
+전체 특징 모델의 평균 AP가 가장 높았고 모든 축소 후보의 평균 AP는 낮았다. 다만 소수 Fail·세 구간의 변동이 있으므로 통계적 유의성이나 일반적인 모델 우수성을 확정하지 않는다.
+
+LightGBM Top-50은 전체 모델보다 불량 4건을 더 찾았지만 정상 109건을 추가 선별해 전체 검사 대상이 113건 늘었다. Top-20은 전체 검사 대상을 86건 줄였으나 불량을 10건 덜 찾았다. RF 중요도 Top-50은 검출 건수가 동일한데 정상 추가 검사 수가 188건 많았다. 따라서 검사량·센서 수·검출률을 함께 비교해야 하며 센서 축소만으로 성능 문제가 해결됐다고 볼 수 없다.
+
+### 구간별 AP와 불안정성
+
+| 모델 | 1구간 AP | 2구간 AP | 3구간 AP |
+| --- | ---: | ---: | ---: |
+| 전체 | 0.0939 | 0.0326 | 0.2435 |
+| LightGBM Top-50 | 0.0845 | 0.0277 | 0.1450 |
+| LightGBM Top-20 | 0.0940 | 0.0551 | 0.1752 |
+| RF 중요도 Top-50 | 0.0673 | 0.0773 | 0.1574 |
+| RF 중요도 Top-20 | 0.0752 | 0.0447 | 0.1916 |
+
+LightGBM Top-20은 1·2구간 AP가 전체 모델보다 높았지만 3구간에서는 낮았다. RF Top-50은 2구간 Recall 1.0을 얻었지만 FP 236건을 만들었고, 3구간에서는 불량 9건을 전부 놓쳤다. 센서 수가 적다는 이유로 안정적인 미래 성능을 주장하지 않는다.
+
+### 선택 센서와 빈도
+
+각 모델의 외부 fit 3회·내부 OOF fit 6회를 별도 기록했다. `selected_features.csv`에는 fit별 특징명·선택 방법·중요도·순위·원본/변환 특징 구분이 있고, `feature_frequency.csv`에는 역할별 분모와 선택 횟수가 있다. 빈도에는 품질 필터에서 제외된 경우도 비선택으로 반영된다. 학습 구간이 겹치므로 독립적인 반복 실험이나 통계 검정으로 해석하지 않는다.
+
+| 선택 방법 | 외부 fit의 선택 특징 합집합 | 세 외부 fit에서 공통 선택한 특징 |
+| --- | ---: | ---: |
+| LightGBM Top-50 | 108개 | 9개 |
+| LightGBM Top-20 | 42개 | 4개 |
+| RF 중요도 Top-50 | 91개 | 16개 |
+| RF 중요도 Top-20 | 38개 | 5개 |
+
+LightGBM의 기본 split 중요도와 RF의 불순도 감소 중요도는 척도가 달라 숫자 자체를 비교하지 않는다. 선택 빈도와 순위도 불량의 인과 센서를 뜻하지 않는다.
+
+전체 Time Train에서 각 방법을 다시 fit해 444·50·20·50·20개의 연구용 후보 목록을 `candidate_features.csv`에 저장했다. 모든 행은 `is_final=False`다. 이 후보 목록을 과거 CV의 특징으로 전역 고정하지 않았으며, 최종 학습 범위·선정 방법을 합의하면 해당 범위에서 다시 선택해야 한다.
+
+### 정책·검증·남은 결정
+
+현재 90%·20% 정책은 5개 모델 × 3개 내부 OOF에서 모두 미충족이었다. 기본 threshold 0.5 결과와 F1 최대 진단 결과를 별도로 보존했지만 정책 통과 후보를 자동 채택하지 않았다.
+
+평가 fit 45회와 전체 Train 후보 fit 5회의 품질 제거 기록·특징 수를 저장했다. 선택된 센서명이 Pipeline의 실제 입력과 일치하는지, Top-K가 정확히 50·20개인지, 외부/내부 빈도 분모가 3·6인지, 후보가 최종으로 표시되지 않는지 테스트했다. 전체 110개 테스트가 통과했다. `reports/analysis.ipynb` 7절에서 비교 표와 선택 빈도 그래프를 확인한다.
+
+축소 비교와 연구용 센서 자료 준비는 완료했다. 최종 모델·센서 집합 합의와 비전체 모델을 채택할 경우 OOF·시간 검증·오류 분석·실행기의 모델 연결은 남아 있다. 이 축소 실험 당시 `run_evaluation.py`의 대상은 `lightgbm_all`이었으며, 이후 XGBoost 연결과 비교를 추가했다(25절). 딥러닝 교과 평가가 추가됐으므로 MLP 비교도 최종 설정 동결 전에 별도로 수행해야 한다.
+
+## 25. XGBoost 추가 비교 (2026-10-06)
+
+### 실험 조건
+
+동일한 `data/splits/integrated/time_train.csv` 1,096행(정상 1,018행·Fail 78행)만 사용했다. 기존 실험과 split 생성 계약이 같으며, 외부 Time Validation과 최종 Test는 이번에 읽거나 평가하지 않았다.
+
+- 후보 비교: 5-fold × 5-repeats, seed 42, threshold 0.50.
+- 품질 필터: 학습 fold에서 결측률 50% 초과·상수 센서를 제거한 뒤 중앙값 대치. 반복 CV에서 두 XGBoost 후보 모두 444개 센서를 사용했다.
+- XGBoost: 트리 300개, 깊이 3, learning rate 0.05, subsample·colsample_bytree 0.8, reg_lambda 1.0, `tree_method=hist`. 이번 실험에서는 튜닝·SMOTE를 적용하지 않았다.
+- 가중치 후보: 각 학습 구간에서 계산한 정상/Fail 건수 비율을 `scale_pos_weight`로 적용했다.
+- threshold 정책: 최소 Recall 90%·최대 재검사율 20%. 미충족 시 임의 문턱으로 대체하지 않는다.
+- 환경: Python 3.10.22, scikit-learn 1.5.2, LightGBM 4.5.0, XGBoost 2.1.3, pandas 2.2.3.
+
+모델 설정과 fold별 학습 근거는 `logs/xgboost_20261006/temporal/temporal_run.json` 및 `quality_filter.csv`에 저장했다. 반복 CV는 모델 내부 병렬 수 1, 시간순·단일 OOF는 2로 실행했다. 실험들을 병행했으므로 학습 시간은 엄밀한 속도 비교 자료가 아니다.
+
+### 반복 CV — 기존 후보를 포함한 재실행
+
+| 모델 | AP 평균 ± 표준편차 | Recall 평균 (threshold 0.50) | ROC-AUC 평균 |
+| --- | ---: | ---: | ---: |
+| XGBoost 기본 | 0.2490 ± 0.0827 | 1.27% | 0.7541 |
+| LightGBM 기본 | 0.2424 ± 0.0665 | 0.27% | 0.7628 |
+| XGBoost 가중치 | 0.2410 ± 0.0834 | 8.97% | 0.7467 |
+| LightGBM 가중치 | 0.2374 ± 0.0692 | 1.53% | 0.7523 |
+| Random Forest | 0.2324 ± 0.0590 | 0.25% | 0.7531 |
+| RBF SVM | 0.1716 ± 0.0361 | 0.00% | 0.6880 |
+| L1 Logistic Regression | 0.1690 ± 0.0493 | 16.37% | 0.6576 |
+| L1 Logistic Regression balanced | 0.1688 ± 0.0489 | 25.10% | 0.6514 |
+
+XGBoost 기본 모델의 AP가 가장 높았지만 LightGBM과의 차이는 약 0.0066이다. 표준편차는 신뢰구간이 아니며 반복 CV fold도 독립 표본이 아니므로, 이 순위만으로 통계적 우위나 최종 후보 확정을 주장하지 않는다. XGBoost 가중치는 0.50에서 Recall을 높였지만 AP는 기본 모델보다 낮았다. 기존 여섯 모델의 지표 평균·표준편차는 이전 로그와 모두 일치했다.
+
+원본: `logs/xgboost_20261006/model_compare.csv`.
+
+### Train 내부 시간순 검증
+
+과거 학습 → 다음 시간 구간 평가를 세 번 수행했다. 외부 평가 대상은 합계 824행(Fail 39행)이며, 최초 학습 구간은 평가에 포함하지 않는다. 각 과거 학습 구간 안에서만 계층 단일 OOF와 시간순 OOF를 만들었다. 시간순 OOF의 초기 미예측 91·182·272행은 제외하고 기록했다.
+
+아래 Recall·재검사율은 시간순 내부 OOF의 F1 최대 진단 문턱을 다음 구간에 적용한 합산 결과다. 정책을 충족한 문턱이나 하나의 최종 모델 성능이 아니다.
+
+| 모델 | 시간 구간 AP 평균 ± 표준편차 | 합산 Recall | 합산 Precision | 재검사율 | TP / FP / FN |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| LightGBM 기본 | 0.1233 ± 0.0886 | 58.97% | 8.13% | 34.34% | 23 / 260 / 16 |
+| LightGBM 가중치 | 0.1201 ± 0.0912 | 69.23% | 6.82% | 48.06% | 27 / 369 / 12 |
+| XGBoost 기본 | 0.1553 ± 0.0649 | 53.85% | 7.89% | 32.28% | 21 / 245 / 18 |
+| XGBoost 가중치 | 0.1749 ± 0.1332 | 71.79% | 6.21% | 54.73% | 28 / 423 / 11 |
+
+XGBoost 가중치의 AP는 세 구간에서 0.1412 → 0.0312 → 0.3522로 크게 변했다. 평균만 보면 가장 높지만 중간 구간에서는 낮았고, 진단 Recall 증가에는 높은 재검사 부담이 따랐다. 기본 XGBoost의 AP 역시 0.1342 → 0.0886 → 0.2432로 변했다. 성능 하락의 원인을 drift 하나로 단정하지 않는다.
+
+네 모델 × 세 외부 구간 × 두 내부 OOF 방식의 정책 선택 24건은 모두 90%·20% 조건 미충족이었다. LightGBM 두 후보의 시간순 요약 지표는 기존 실험과 일치했다.
+
+원본: `logs/xgboost_20261006/temporal/summary.csv`, `fold_results.csv`, `policy_selection.csv`.
+
+### 전체 Time Train의 단일 OOF — 운영 제약 비교
+
+두 XGBoost 후보 모두 1회 5-fold로 샘플당 한 번의 OOF 확률을 생성했다. AP는 기본 0.1877, 가중치 0.1798이었다. 이 AP는 fold별 AP를 평균한 반복 CV 지표와 계산 방식이 다르다.
+
+저장된 101개 분위수와 기본 threshold 후보 중, Recall 90% 이상에서 재검사율이 가장 낮은 후보를 비교했다.
+
+| 모델 | 실제 Recall | 재검사율 | TP | FP | FN | 90%·20% 충족 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| LightGBM 기본 — 기존 단일 OOF | 91.03% | 66.97% | 71 | 663 | 7 | 아니오 |
+| XGBoost 기본 | 91.03% | 63.96% | 71 | 630 | 7 | 아니오 |
+| XGBoost 가중치 | 91.03% | 67.97% | 71 | 674 | 7 | 아니오 |
+
+기본 XGBoost는 같은 TP 71·FN 7에서 LightGBM보다 정상 재검사를 33건 줄였다. 다만 상한 20%와는 여전히 차이가 크다. 재검사율 20% 이하의 저장 후보 중 최대 Recall은 XGBoost 기본 46.15%(TP 36·FP 162·FN 42), 가중치 42.31%(TP 33·FP 176·FN 45)였다.
+
+이 결과는 저장된 후보 격자 안의 비교이며 모든 가능한 threshold의 정확한 최적값을 뜻하지 않는다. 상세 문턱은 각 `threshold_compare.csv`의 반올림하지 않은 값을 확인한다. 정책 통과 후보가 없으므로 최종 threshold·모델을 확정하거나 외부 Validation을 추가 평가하지 않았다.
+
+원본: `logs/xgboost_20261006/xgboost/`, `logs/xgboost_20261006/xgboost_scale_pos_weight/`.
+
+### 재현 명령과 다음 단계
+
+아래는 이번 실행 조건이다. 시간순 실험을 재실행할 때는 비어 있는 새 출력 폴더를 지정한다.
+
+```powershell
+python src/step5_model_compare.py --train data/splits/integrated/time_train.csv --output logs/xgboost_20261006/model_compare.csv
+python src/temporal_validation.py --train data/splits/integrated/time_train.csv --output-dir logs/xgboost_20261006/temporal --models lightgbm lightgbm_scale_pos_weight xgboost xgboost_scale_pos_weight --n-jobs 2
+python src/step8_threshold_oof.py --train data/splits/integrated/time_train.csv --experiment xgboost --oof-output logs/xgboost_20261006/xgboost/oof_predictions.csv --threshold-output logs/xgboost_20261006/xgboost/threshold_compare.csv --score-method single --n-jobs 2
+python src/step8_threshold_oof.py --train data/splits/integrated/time_train.csv --experiment xgboost_scale_pos_weight --oof-output logs/xgboost_20261006/xgboost_scale_pos_weight/oof_predictions.csv --threshold-output logs/xgboost_20261006/xgboost_scale_pos_weight/threshold_compare.csv --score-method single --n-jobs 2
+```
+
+현재 판단은 **XGBoost 기본 모델을 후속 비교 후보로 유지하되, 운영 가능 모델로 확정하지 않는다**이다. 가중치도 비교 기록으로 보존한다. 다음 필수 확장은 같은 Train·학습 fold 내부 전처리·시간순 검증을 사용하는 MLP 딥러닝 비교다. 정책 합의와 최종 모델·threshold 동결 전까지 Test를 사용하지 않는다.
+
+## 26. XGBoost 센서 선택 방법별 Top-20 비교 (2026-10-06)
+
+### 실험 조건과 비교 대상
+
+1단계로 같은 Time Train 1,096행(정상 1,018행·Fail 78행)에서 세 실험을 비교했다. `RepeatedStratifiedKFold` 5-fold × 5-repeats, seed 42, threshold 0.50을 사용했다. 이는 시간순으로 분리한 Train **내부의 계층 무작위 CV**이며 미래 시간 구간 평가가 아니다. 외부 Time Validation과 Test는 사용하지 않았다.
+
+품질 필터·중앙값 대치·센서 선택은 매 학습 fold 내부에서만 fit했다. 세 실험의 모든 fold에서 원본 590개 센서 중 결측률 50% 초과 24개, 상수 122개를 제거해 444개가 남았다. 이후 두 축소 실험은 각각 정확히 20개를 선택했다.
+
+| 실험 이름 | 센서 선택 방식 | 최종 분류기 |
+| --- | --- | --- |
+| `xgboost_all` | 품질 필터 후 전체 444개 | XGBoost 기본 |
+| `xgboost_top_20` | XGBoost gain 중요도 상위 20개 | 같은 XGBoost 기본 |
+| `xgboost_rf_top_20` | RF 불순도 감소 중요도 상위 20개 | 같은 XGBoost 기본 |
+
+최종 분류기 설정은 세 실험 모두 트리 300개, 깊이 3, learning rate 0.05, subsample·colsample_bytree 0.8, reg_lambda 1.0, `tree_method=hist`, `scale_pos_weight=1`이다. RF 선택기는 트리 300개·Gini 기준을 사용했다. 선택용 모델과 축소 특징으로 학습하는 최종 분류기는 별개의 모델이다. 모델 내부 병렬 수는 2이며 튜닝·SMOTE·threshold 조절은 적용하지 않았다.
+
+### 반복 CV 결과
+
+| 센서 선택 방식 | 최종 분류기 입력 수 | AP 평균 ± 표준편차 | Recall 평균 | Precision 평균 | F1 평균 | ROC-AUC 평균 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 전체 센서 | 444 | 0.2490 ± 0.0827 | 1.27% | 20.00% | 0.0238 | 0.7541 |
+| RF 중요도 Top-20 | 20 | 0.2459 ± 0.0523 | 5.85% | 27.91% | 0.0933 | 0.7826 |
+| XGBoost gain Top-20 | 20 | 0.2044 ± 0.0561 | 3.28% | 23.33% | 0.0557 | 0.7489 |
+
+Recall·Precision·F1은 threshold 0.50에서의 fold별 평균이다. 합산 confusion matrix로 계산한 지표나 최종 성능이 아니다. AP는 threshold 0.50으로 이진화하기 전의 예측 확률 순위를 평가한다. 전체 센서 모델의 지표 평균·표준편차는 25절의 기본 XGBoost 결과와 일치했다.
+
+같은 fold끼리 AP를 비교하면 다음과 같다. 아래 차이는 `Top-20 AP - 전체 AP`이며 표준편차는 25개 차이의 기술 통계다.
+
+| 축소 방식 | AP 차이 평균 ± 표준편차 | 전체보다 AP가 높은 fold | 전체 평균 AP 대비 비율 |
+| --- | ---: | ---: | ---: |
+| RF 중요도 Top-20 | -0.0031 ± 0.0683 | 13 / 25 | 98.76% |
+| XGBoost gain Top-20 | -0.0446 ± 0.0830 | 8 / 25 | 82.08% |
+
+**RF 중요도 Top-20을 우선 후속 비교 후보로 유지한다.** 평균 AP 감소가 약 0.0031로 작고 ROC-AUC와 고정 문턱 Recall도 전체보다 높았다. 반면 XGBoost gain Top-20은 평균 AP가 약 0.0446 낮았다. 서로 다른 중요도 수치의 크기를 직접 비교하지 않고, 선택 후 동일한 분류기의 성능을 비교한 판단이다.
+
+98.76%는 두 평균 AP의 비율일 뿐 성능 동등성의 증명이 아니다. 허용 성능 저하 기준은 아직 합의하지 않았고 반복 fold는 독립 표본이 아니므로, 표준편차나 13/25 승리만으로 통계적 우위·동등성을 주장하지 않는다. 세 모델 모두 threshold 0.50의 Recall이 낮으며 현재 90%·20% 정책을 통과했다는 뜻도 아니다.
+
+### 선택 센서 안정성과 남은 확인
+
+RF 선택의 25개 fold에서 등장한 센서는 총 63종, XGBoost 선택은 253종이었다. RF는 `sensor_59`, `sensor_64`, `sensor_65`를 25회 모두 선택했고 `sensor_40`, `sensor_67`은 23회 선택했다. XGBoost 선택에서 25회 모두 등장한 센서는 `sensor_59` 하나였다. RF 선택이 이 CV에서 상대적으로 더 일관됐지만, 동일한 데이터를 반복한 빈도이며 센서의 물리적 원인이나 최종 센서 집합을 의미하지 않는다.
+
+중요한 범위 구분은 다음과 같다.
+
+- 이번 결과는 **각 fold에서 선택한 20개**의 성능이다. 고정된 하나의 센서 20개 집합을 검증한 결과가 아니다. 전체 Train의 중요도나 CV 선택 빈도로 목록을 고정한 뒤 같은 CV를 다시 평가하면 선택 누수가 발생할 수 있다.
+- 현재 Pipeline은 품질 필터·대치·선택기를 거치므로 추론 입력에는 기존 원본 센서 컬럼이 필요하다. **최종 분류기가 20개를 사용한다는 것과 원본 20개만 입력받는 추론 Pipeline 완성은 다르다.** 방법 확정 후 최종 학습에서 센서를 고정하고, 선택된 열만으로 동작하는 추론 구성을 별도로 준비해야 한다.
+- 다음 비교는 전체 XGBoost와 RF Top-20의 **Time Train 내부 시간순 검증**이다. 필요한 threshold는 각 과거 학습 구간의 내부 OOF에서만 결정한다. 미래 구간의 결과에 문턱을 직접 맞추지 않는다.
+- 시간 일반화 확인·허용 저하 기준 합의·최종 센서 동결 전에는 “590개를 20개로 줄이고 같은 성능을 냈다”는 포트폴리오 문구를 확정하지 않는다. 필수 딥러닝 MLP 비교도 별도로 남아 있다.
+
+### 산출물과 재현 명령
+
+`src/modeling_models.py`에 두 Top-K 선택 방식과 전체 XGBoost 실험을 추가했다. K는 기존 설정의 `top_k_feature_counts`를 사용하므로 다른 데이터에도 같은 코어를 사용할 수 있다. `src/step6_feature_compare.py`는 `--experiments`로 지정한 실험만 실행하며, 옵션을 생략하면 기존 PCA·L1·LightGBM 실험 목록을 유지한다.
+
+결과는 `logs/xgboost_top20_20261006/`에 기존 로그와 분리해 저장했다.
+
+- `feature_compare.csv`: 세 실험 요약 및 fold별 품질 필터 기록.
+- `details/fold_results.csv`: 75개 실험-fold의 지표·특징 수·학습 시간.
+- `details/selected_features.csv`: 두 선택 방법의 1,000개 센서 선택 기록(2 × 25 × 20), 순위·중요도·특징 종류.
+- `details/feature_run.json`: 입력 경로·split 계약·설정·라이브러리 버전·최종 미확정 상태.
+
+모든 선택 기록이 원본 센서이고 fold별 중복 없이 20개인지 확인했다. 공통 분류기 설정 유지·fold별 기록·학습 시 상수였던 센서의 검증 입력 변화에 대한 방어를 추가 검증했으며 전체 테스트 121개가 통과했다.
+
+재실행 시 상세 결과 폴더는 비어 있는 새 폴더로 지정한다.
+
+```powershell
+python src/step6_feature_compare.py --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_top_20 xgboost_rf_top_20 --output logs/xgboost_top20_run/feature_compare.csv --details-dir logs/xgboost_top20_run/details --n-jobs 2
+```
+
+## 27. XGBoost 전체 vs RF Top-20 시간순 검증 (2026-10-06)
+
+### 검증 범위와 데이터 사용 원칙
+
+26절에서 반복 CV 성능이 가까웠던 `xgboost_all`과 `xgboost_rf_top_20`을 동일한 Time Train 내부의 확장형 시간 구간 3개에서 비교했다. 외부 Time Validation 파일과 최종 Test는 읽지 않았다. 이미 개발에 사용한 Train의 시간순 진단이며 독립적인 최종 성능이 아니다.
+
+각 구간에서 과거 데이터만으로 품질 필터·중앙값 대치·RF 센서 선택·XGBoost 학습을 수행했다. 최종 분류기와 RF 선택기는 앞선 비교와 같은 설정으로 트리 300개·seed 42·내부 병렬 수 2를 사용했다. 튜닝·SMOTE·가중치 변경은 적용하지 않았다. 동일 timestamp는 분리하지 않고 학습 종료 시각이 평가 시작 시각보다 빠른지 검사했다.
+
+각 과거 학습 구간 내부에서 시간순 OOF 2구간으로 threshold 후보를 만들었다. 초기 미예측 91·182·272행은 제외했고 0점으로 채우지 않았다. 외부 구간의 label은 threshold를 정한 후 성능 평가에만 사용했다. 현재 정책인 최소 Recall 90%·최대 양성 판정 비율 20%는 변경하지 않았다.
+
+### 구간별 AP
+
+평가 범위는 2008-08-18 이후부터 2008-09-26까지이며, 합계 824행 중 Fail은 39행이다. 최초 학습 구간 272행은 외부 평가에 포함하지 않았다. 정확한 시간 경계는 `folds.csv`에 기록했다.
+
+| 시간 구간 | 과거 학습 수 / Fail | 다음 구간 평가 수 / Fail | 전체 모델 센서 수 | 전체 AP | RF Top-20 AP |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 272 / 39 | 279 / 22 | 448 | 0.1342 | 0.0874 |
+| 2 | 551 / 61 | 273 / 8 | 444 | 0.0886 | 0.0450 |
+| 3 | 824 / 69 | 272 / 9 | 444 | 0.2432 | 0.2206 |
+| 구간 평균 | — | — | — | **0.1553 ± 0.0649** | **0.1177 ± 0.0748** |
+
+RF 선택 모델은 모든 외부 fit과 내부 OOF fit에서 원본 센서 20개를 사용했다. 전체 센서 모델은 세 구간의 AP·threshold·confusion matrix가 25절의 기본 XGBoost 시간순 결과와 일치했다.
+
+세 구간 모두 전체 모델의 AP가 높았으며 RF Top-20의 평균 AP는 약 0.0377 낮았다. 평균 비율은 약 75.75%로, 반복 CV의 98.76% 유지 비율을 시간순 평가에서 재현하지 못했다. 허용 저하 기준이나 통계적 동등성 검정 없이 “20개로 같은 성능을 유지했다”고 주장하지 않는다. 구간별 학습량·불량 비율·분포가 다르므로 CV와 시간순 AP 차이의 원인을 drift 하나로 단정하지 않는다.
+
+### Threshold 적용 결과와 정책 충족 여부
+
+기본 threshold 0.50에서 전체 모델은 TP 0·FP 0·FN 39, RF Top-20은 TP 2·FP 9·FN 37이었다. 두 모델 모두 이 기본 문턱으로는 검출률이 낮았다.
+
+아래 표는 각 과거 학습 구간의 시간순 OOF에서 **F1 최대 진단 문턱**을 정하고 다음 구간에 적용한 합산 결과다. 구간마다 학습 모델·센서 목록·문턱이 달라 하나의 최종 모델 성능이 아니다. 90%·20% 정책 통과 문턱으로 대체해 해석하지 않는다.
+
+| 모델 | 합산 Recall | 합산 Precision | 양성 판정 비율 | TP | FP | FN |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 전체 XGBoost | 53.85% | 7.89% | 32.28% | 21 | 245 | 18 |
+| RF Top-20 → XGBoost | 69.23% | 5.51% | 59.47% | 27 | 463 | 12 |
+
+양성 판정 비율은 `(TP + FP) / 전체 평가 수`이며 실제 추가 검사를 수행했다는 뜻이 아니다. RF Top-20은 전체보다 불량 6건을 더 찾았으나 정상 오탐도 218건 늘었다. 선택 방식뿐 아니라 OOF에서 정한 문턱도 서로 다르므로 Recall 증가를 센서 축소의 단독 효과로 해석하지 않는다.
+
+특히 RF Top-20의 두 번째 시간 구간은 TP 8·FP 263으로 273행 중 271행(99.27%)을 양성으로 판정했다. Recall 100%지만 선별 효과가 낮은 결과이므로 Recall만 보고 우수한 후보로 채택하지 않는다. 첫 번째와 세 번째 구간에서는 각각 TP 16·FP 190·FN 6, TP 3·FP 10·FN 6이었다.
+
+정책 판정 6건(두 모델 × 세 구간)은 내부 OOF에서 모두 **미충족**이었다. `policy_selection.csv`의 threshold는 결측으로 남겼고 정책 기반 미래 성능은 계산하지 않았다. 위 F1 진단 비교는 별도의 연구용 기록으로 보존했다. 기준을 결과에 맞춰 완화하거나 미래 구간에서 threshold를 재탐색하지 않았다.
+
+### 센서 목록과 현재 판단
+
+RF의 외부 학습 3회에서 등장한 센서는 38종이며, 모두 선택된 센서는 `sensor_267`, `sensor_67`, `sensor_562`, `sensor_441`, `sensor_169`의 5개였다. 내부 OOF fit 6회의 선택 목록은 별도로 기록했고 등장 센서는 59종이었다. 학습 구간이 겹치는 빈도 자료이며 인과관계·최종 센서 고정 근거로 단독 사용하지 않는다.
+
+전체 Time Train으로 연구용 Top-20 후보도 만들었지만 `is_final=False`로 기록했다. 이 목록을 과거 CV·시간순 평가에 소급 적용하지 않았고 모델·threshold·센서 집합을 동결하지 않았다. 현재 추론 Pipeline은 원본 센서 입력을 요구하며 원본 20개만 받는 추론 구성도 미완료다.
+
+**판단:** RF Top-20은 센서 축소 비교 후보로 보존하되, 전체 모델과의 성능 동등성 또는 운영 가능성을 주장하지 않는다. 현재 전체 XGBoost가 시간순 AP의 비교 기준이다. 다음 작업은 합의된 허용 저하 기준 아래에서 센서 선택·특징·모델 개선을 비교하고, 필수 딥러닝 MLP 후보를 동일한 누수 방지·시간순 평가 조건에 추가하는 것이다. 최종 후보와 threshold 확정 전까지 Test는 사용하지 않는다.
+
+### 실행 코드·산출물
+
+`src/feature_time_compare.py`에 `--experiments`를 추가해 공통 XGBoost Pipeline을 기존 시간순 코어에 연결했다. 옵션을 생략하면 기존 LightGBM 전체·Top-50/20 목록을 유지한다. XGBoost gain과 RF 중요도는 센서 기록에서도 구분한다. 전체 테스트 123개가 통과했고 실제 실행의 과거→미래 경계·fold별 20개 원본 센서·기존 전체 모델 결과 일치를 확인했다.
+
+결과는 `logs/xgboost_top20_time_20261006/`에 저장했다. `summary.csv`, `fold_results.csv`, `folds.csv`에서 성능과 구간을, `oof_coverage.csv`, `threshold_compare.csv`, `policy_selection.csv`에서 문턱 출처와 미충족을 확인한다. `selected_features.csv`, `feature_frequency.csv`, `candidate_features.csv`에는 선택 센서·빈도·최종 미확정 후보가 있다. `quality_filter.csv`와 `candidate_quality_filter.csv`에는 실제 센서 제거 기록, `feature_run.json`에는 설정·모델 이름·환경 버전·split 계약을 보관했다.
+
+재실행할 때는 비어 있는 새 출력 폴더를 지정한다.
+
+```powershell
+python src/feature_time_compare.py --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_rf_top_20 --output-dir logs/xgboost_top20_time_run --n-jobs 2
+```

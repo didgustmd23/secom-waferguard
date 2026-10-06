@@ -117,3 +117,36 @@ def validate_dataset_frame(dataframe: pd.DataFrame, dataset: DatasetSpec) -> tup
         )
 
     return feature_columns
+
+
+# ==========================================
+# split DataFrame을 검증하고 동일한 feature 순서의 X, y로 분리
+# - Profile 규칙으로 label, metadata, feature dtype을 먼저 검증
+# - Validation feature의 순서가 달라도 Train feature 순서로 재정렬
+# - feature 집합이 다르면 조용히 보정하지 않고 split 생성 오류로 중단
+# ==========================================
+def split_frame_to_xy(
+    dataframe: pd.DataFrame,
+    dataset: DatasetSpec,
+    *,
+    expected_feature_columns: tuple[str, ...] | None = None,
+) -> tuple[pd.DataFrame, pd.Series, tuple[str, ...]]:
+    # Dataset Profile과 DataFrame의 label, metadata, feature 타입 일치 여부를 검증한다.
+    feature_columns = validate_dataset_frame(dataframe, dataset)
+
+    if expected_feature_columns is not None:
+        # 순서 차이는 Train 기준으로 맞출 수 있지만, 누락 또는 추가 feature는 허용하지 않는다.
+        if set(feature_columns) != set(expected_feature_columns):
+            raise ValueError(
+                "Train과 Validation의 feature column 구성이 일치하지 않습니다; "
+                f"Train={list(expected_feature_columns)}, "
+                f"Validation={list(feature_columns)}"
+            )
+        feature_columns = expected_feature_columns
+
+    # 모델에는 검증된 feature만 전달하고 label은 원래 label 값으로 유지한다.
+    return (
+        dataframe.loc[:, list(feature_columns)],
+        dataframe[dataset.label_column],
+        feature_columns,
+    )

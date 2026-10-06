@@ -15,6 +15,21 @@ from src.modeling_config import MODELING_CONFIG, load_dataset_spec, load_modelin
 
 
 class ModelingConfigTest(unittest.TestCase):
+    def test_threshold_policy_loads(self):
+        raw = json.loads(Path("config.json").read_text(encoding="utf-8"))
+        self.assertEqual(MODELING_CONFIG.threshold_policy.min_recall, raw["threshold_policy"]["min_recall"])
+        self.assertEqual(MODELING_CONFIG.threshold_policy.max_reinspection_ratio, 0.2)
+
+    def test_rejects_invalid_threshold_policy(self):
+        # 잘못된 범위·자료형·선택 규칙을 설정 로드 단계에서 차단한다.
+        for key, value in (("min_recall", -0.1), ("min_recall", True),
+                           ("min_recall", float("nan")),
+                           ("max_reinspection_ratio", float("inf")),
+                           ("max_reinspection_ratio", 1.1),
+                           ("selection_rule", "max_f1"), ("on_infeasible", "relax")):
+            with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+                self._load_variant("threshold_policy", key, value)
+
     def _load_variant(self, section, key, value):
         # 실제 설정은 보존하고 경계값을 바꾼 임시 설정만 로드한다.
         raw = json.loads(Path("config.json").read_text(encoding="utf-8"))

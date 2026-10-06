@@ -13,24 +13,23 @@ from pathlib import Path
 from time import perf_counter
 
 import pandas as pd
-from sklearn.base import clone
 
 try:
     from src.modeling_config import DEFAULT_CONFIG_PATH, ModelingConfig, load_modeling_config
     from src.modeling_metrics import evaluate_binary_scores
-    from src.step4_baseline import split_frame_to_xy
-    from src.step6_feature_compare import build_experiments
-    from src.modeling_preprocessing import fitted_feature_count
+    from src.dataset_schema import split_frame_to_xy
+    from src.modeling_models import build_pipeline, fit_pipeline, positive_scores
+    from src.modeling_preprocessing import fitted_feature_count, quality_filter_record, quality_filter_json
     from src.split_contract import PROTOCOL_ID, validate_split_pair
-    from src.step8_threshold_oof import validate_threshold_report
+    from src.threshold_policy import validate_threshold_report
 except ModuleNotFoundError:
     from modeling_config import DEFAULT_CONFIG_PATH, ModelingConfig, load_modeling_config
     from modeling_metrics import evaluate_binary_scores
-    from step4_baseline import split_frame_to_xy
-    from step6_feature_compare import build_experiments
-    from modeling_preprocessing import fitted_feature_count
+    from dataset_schema import split_frame_to_xy
+    from modeling_models import build_pipeline, fit_pipeline, positive_scores
+    from modeling_preprocessing import fitted_feature_count, quality_filter_record, quality_filter_json
     from split_contract import PROTOCOL_ID, validate_split_pair
-    from step8_threshold_oof import validate_threshold_report
+    from threshold_policy import validate_threshold_report
 
 
 # 기존 탐색 단계의 비교 후보 목록이다. 새 평가에서도 후보를 Train 내부에서 사전 선정한다.
@@ -40,15 +39,10 @@ PRESELECTED_EXPERIMENTS = (
     "l1_balanced_l1_select",
 )
 
-
-# ==========================================
-# 학습된 Pipeline에서 실제 사용한 feature 개수를 계산
-# - selector가 없으면 변환 후 모델 입력 수를 사용한다.
-# - L1 selector는 Train 데이터에서 선택된 support 개수만 기록한다.
-# ==========================================
-def _selected_feature_count(model, input_feature_count: int) -> int:
-    # 입력 수 대신 변환·선택 후 모델이 받은 실제 특징 수를 반환한다.
-    return fitted_feature_count(model)
+AVAILABLE_EXPERIMENTS = PRESELECTED_EXPERIMENTS + (
+    "xgboost",
+    "xgboost_scale_pos_weight",
+)
 
 
 # ==========================================
@@ -67,6 +61,12 @@ def compare_time_validation(
     n_jobs: int = 1,
     threshold_report: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
+    """사전 선택된 실험을 시간 순서 Validation 구간에서 평가한다.
+
+    전처리·특징 선택·모델 학습은 과거 구간인 Train에서만 수행한다.
+    threshold는 OOF에서 미리 정한 값을 그대로 쓰며, Validation으로
+    threshold를 다시 고르지 않아 평가 자료에 맞춘 낙관 편향을 방지한다.
+    """
     if not experiment_names:
         raise ValueError("시간 검증할 후보 모델을 하나 이상 지정해야 합니다.")
 
@@ -95,37 +95,27 @@ def compare_time_validation(
         validate_threshold_report(threshold_report, train_frame, config,
                                   experiment_names[0], evaluation_threshold)
 
-    # step6과 동일한 후보 정의를 재사용해 Random CV와의 모델 조건을 유지한다.
-    available_experiments = build_experiments(config, n_jobs=n_jobs)
-    unknown_names = sorted(set(experiment_names) - set(available_experiments))
-    if unknown_names:
-        raise ValueError(f"정의되지 않은 후보 모델입니다: {unknown_names}")
+    # 후보·특징 실험 모두 동일한 이름 해석 규칙으로 필요한 Pipeline만 만든다.
+    available_experiments = {
+        name: build_pipeline(config, name, n_jobs=n_jobs) for name in experiment_names
+    }
 
     rows: list[dict[str, object]] = []
     for experiment_name in experiment_names:
-        pipeline = clone(available_experiments[experiment_name])
-
-        # 모든 전처리와 모델은 과거 구간인 Time Train에서만 학습한다.
+        # 공통 fit은 전처리·선택·가중치를 Time Train에서만 학습한다.
         started_at = perf_counter()
-        pipeline.fit(train_x, train_y)
+        pipeline = fit_pipeline(
+            available_experiments[experiment_name], train_x, train_y,
+            config, experiment_name, n_jobs=n_jobs,
+        )
         fit_seconds = perf_counter() - started_at
-
-        # predict_proba의 열 순서를 가정하지 않고 Profile의 Fail label 위치를 찾는다.
-        fitted_model = pipeline.named_steps["model"]
-        class_positions = [
-            index
-            for index, label in enumerate(fitted_model.classes_)
-            if label == config.dataset.positive_label
-        ]
-        if len(class_positions) != 1:
-            raise ValueError("학습된 후보 모델에서 Profile의 Fail label을 찾을 수 없습니다.")
-        positive_scores = pipeline.predict_proba(validation_x)[:, class_positions[0]]
+        positive_scores_array = positive_scores(pipeline, validation_x, config.dataset)
 
         # OOF에서 정한 threshold를 그대로 적용해 시간 구간의 일반화만 확인한다.
         # 이 함수는 Time Validation 결과로 threshold를 다시 탐색하지 않는다.
         metrics = evaluate_binary_scores(
             validation_y,
-            positive_scores,
+            positive_scores_array,
             positive_label=config.dataset.positive_label,
             negative_label=config.dataset.negative_label,
             threshold=evaluation_threshold,
@@ -138,10 +128,9 @@ def compare_time_validation(
                 "experiment": experiment_name,
                 "train_samples": len(train_frame),
                 "validation_samples": len(validation_frame),
-                "selected_feature_count": _selected_feature_count(
-                    pipeline, len(feature_columns)
-                ),
+                "selected_feature_count": fitted_feature_count(pipeline),
                 "fit_time_seconds": fit_seconds,
+                "quality_filter_log": quality_filter_json([quality_filter_record(pipeline)]),
                 **asdict(metrics),
             }
         )
@@ -165,6 +154,7 @@ def compare_time_validation_from_files(
     n_jobs: int = 1,
     threshold_report_path: Path | str | None = None,
 ) -> pd.DataFrame:
+    """설정·분할 CSV를 읽어 시간 검증을 수행하고 결과 CSV를 저장한다."""
     # 파일을 읽는 경계에서만 I/O를 수행하고, 실제 평가는 순수 함수에 위임한다.
     config = load_modeling_config(config_path)
     result = compare_time_validation(
@@ -184,6 +174,7 @@ def compare_time_validation_from_files(
 
 
 def _parse_arguments() -> argparse.Namespace:
+    """Time Validation CLI 옵션을 정의하고 파싱한다."""
     # Test 경로 인자를 제공하지 않아 CLI 단계에서 Test 오용을 막는다.
     parser = argparse.ArgumentParser(description="사전 선택 모델의 Time Validation 비교")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
@@ -198,7 +189,7 @@ def _parse_arguments() -> argparse.Namespace:
         "--n-jobs",
         type=int,
         default=1,
-        help="LightGBM 내부 병렬 처리 수입니다. 로컬 실행은 -1을 사용할 수 있습니다.",
+        help="트리 모델 내부 병렬 처리 수입니다. 로컬 실행은 -1을 사용할 수 있습니다.",
     )
     parser.add_argument(
         "--threshold",
@@ -212,7 +203,7 @@ def _parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--experiments",
         nargs="+",
-        choices=PRESELECTED_EXPERIMENTS,
+        choices=AVAILABLE_EXPERIMENTS,
         default=list(PRESELECTED_EXPERIMENTS),
         help="Time Validation에 평가할 사전 선택 후보 이름입니다.",
     )
@@ -220,6 +211,7 @@ def _parse_arguments() -> argparse.Namespace:
 
 
 def main() -> None:
+    """CLI 진입점: 평가를 수행하고 결과를 터미널에 요약한다."""
     # OOF에서 정한 threshold를 그대로 전달해 Time Validation 결과만 출력한다.
     arguments = _parse_arguments()
     result = compare_time_validation_from_files(
