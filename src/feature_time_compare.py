@@ -23,7 +23,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import sklearn
-from lightgbm import LGBMClassifier
 from sklearn.base import clone
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_selection import SelectFromModel
@@ -32,15 +31,17 @@ from sklearn.pipeline import Pipeline
 try:
     from src.modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
     from src.modeling_preprocessing import preprocessing_steps, quality_filter_record, quality_filter_json
-    from src.step4_baseline import split_frame_to_xy
-    from src.step6_feature_compare import _checked_top_k
+    from src.dataset_schema import split_frame_to_xy
+    from src.modeling_models import build_classifier, fit_pipeline
+    from src.modeling_preprocessing import checked_top_k
     from src.temporal_validation import compare_temporal
     from src.split_contract import PROTOCOL_ID
 except ModuleNotFoundError:
     from modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
     from modeling_preprocessing import preprocessing_steps, quality_filter_record, quality_filter_json
-    from step4_baseline import split_frame_to_xy
-    from step6_feature_compare import _checked_top_k
+    from dataset_schema import split_frame_to_xy
+    from modeling_models import build_classifier, fit_pipeline
+    from modeling_preprocessing import checked_top_k
     from temporal_validation import compare_temporal
     from split_contract import PROTOCOL_ID
 
@@ -53,20 +54,18 @@ except ModuleNotFoundError:
 def build_feature_pipelines(config, *, n_jobs=1, n_estimators=300):
     if isinstance(n_estimators, bool) or not isinstance(n_estimators, int) or n_estimators < 1:
         raise ValueError("트리 수는 양의 정수여야 합니다.")
-    seed = config.experiment.cv.random_state
     # 모든 최종 분류기의 설정이 같아야 센서 축소에 따른 차이를 해석할 수 있다.
-    classifier = LGBMClassifier(n_estimators=n_estimators, random_state=seed, n_jobs=n_jobs, verbosity=-1)
+    classifier = build_classifier(config, "lightgbm", n_jobs=n_jobs, n_estimators=n_estimators)
     steps = preprocessing_steps(config.dataset, pandas_output=True)
     pipelines = {"lightgbm_all": Pipeline(steps + [("model", clone(classifier))])}
     for method in ("lightgbm", "rf_importance"):
         for count in (50, 20):
             # 매 Pipeline마다 독립된 전처리기·선택기·분류기를 사용한다.
-            importance = clone(classifier) if method == "lightgbm" else RandomForestClassifier(
-                n_estimators=n_estimators, random_state=seed, n_jobs=n_jobs)
+            importance = clone(classifier) if method == "lightgbm" else build_classifier(config, "random_forest", n_jobs=n_jobs, n_estimators=n_estimators)
             selector = SelectFromModel(importance, threshold=-np.inf,
-                max_features=partial(_checked_top_k, count=count))
+                max_features=partial(checked_top_k, count=count))
             # -inf는 중요도 자체의 최소값 제한을 없애고 max_features로 정확히 K개 선택한다.
-            # _checked_top_k는 대치·One-Hot 후 해당 fold의 실제 특징 수를 검사한다.
+            # checked_top_k는 대치·One-Hot 후 해당 fold의 실제 특징 수를 검사한다.
             name = f"lightgbm_top_{count}" if method == "lightgbm" else f"lightgbm_rf_top_{count}"
             pipelines[name] = Pipeline(preprocessing_steps(config.dataset, pandas_output=True) +
                                         [("selector", selector), ("model", clone(classifier))])
@@ -144,7 +143,7 @@ def compare_feature_time(frame, config, *, n_jobs=1, n_estimators=300):
     for name, pipeline in pipelines.items():
         # clone으로 CV의 학습 상태를 버린 뒤 전체 Time Train에서 새로 fit한다.
         # 최종 모델·학습 범위를 아직 합의하지 않았으므로 is_final=False로 저장한다.
-        model = clone(pipeline).fit(features, labels)
+        model = fit_pipeline(pipeline, features, labels, config, name, n_jobs=n_jobs)
         candidates.extend(selection_rows(model, {"model_name": name, "fit_role": "candidate_full_train",
                            "train_samples": len(frame), "is_final": False}))
         quality.append({"model_name": name, **quality_filter_record(model)})

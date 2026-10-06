@@ -8,6 +8,11 @@
 import numpy as np
 import pandas as pd
 
+try:
+    from src.split_contract import PROTOCOL_ID
+except ModuleNotFoundError:
+    from split_contract import PROTOCOL_ID
+
 
 # ==========================================
 # 후보 표를 검증하고 재검사 비율·정책 충족 여부 추가
@@ -18,6 +23,11 @@ import pandas as pd
 # - 복사본을 반환하므로 원본 후보 표와 기존 로그는 수정하지 않음
 # ==========================================
 def policy_candidates(table, policy, *, score_kind="probability"):
+    """OOF 후보표를 검증하고 재검사 비율 및 정책 충족 여부를 계산한다.
+
+    입력 표를 변경하지 않고 복사본을 반환한다. 확률 점수와 anomaly 점수의
+    threshold 범위는 다르게 검사하며, 표본·오류 건수 및 Recall 일관성도 확인한다.
+    """
     # 점수 종류 오타로 확률 범위 검사가 우회되지 않게 먼저 확인한다.
     if score_kind not in {"probability", "anomaly"}:
         raise ValueError("점수 종류는 probability 또는 anomaly여야 합니다.")
@@ -80,6 +90,11 @@ def policy_candidates(table, policy, *, score_kind="probability"):
 # - 반환값은 원본 수치이며 화면 표시용 반올림을 적용하지 않음
 # ==========================================
 def select_policy_threshold(table, policy, *, score_kind="probability"):
+    """정책 제약을 충족한 후보 중 우선순위 규칙에 따라 threshold 하나를 고른다.
+
+    우선순위는 재검사 비율 최소화, Recall 최대화, threshold 최대화 순이다.
+    조건을 충족하는 후보가 없으면 다른 지표의 최적값으로 대체하지 않고 None을 반환한다.
+    """
     # 선택은 OOF 후보만 사용하며 미래 평가 label을 받지 않는다.
     candidates = policy_candidates(table, policy, score_kind=score_kind)
     # 조건을 통과한 후보만 남기며 목표 미달인 인접 후보는 선택하지 않는다.
@@ -91,3 +106,36 @@ def select_policy_threshold(table, policy, *, score_kind="probability"):
     row = feasible.sort_values(["reinspection_ratio", "recall", "threshold"],
                                ascending=[True, False, False]).iloc[0]
     return float(row.threshold)
+
+
+# ==========================================
+# 시간 검증에 적용할 threshold 비교표의 출처 확인
+# - 동일한 Train 생성 계약·데이터셋·모델의 단일 OOF 후보만 허용
+# - 반복 평균 분석 결과와 legacy 출처 불명 결과는 최종 threshold 근거로 사용하지 않음
+# ==========================================
+def validate_threshold_report(report, train_frame, config, experiment, threshold):
+    """사용하려는 threshold가 현재 학습 실행에서 나온 후보인지 확인한다.
+
+    데이터셋, split 계약, 실험 이름, OOF 방식과 수치 범위를 대조한다.
+    이를 통해 다른 데이터나 과거 실행의 보고서를 실수로 적용하는 것을 막는다.
+    """
+    required = {"dataset_id", "experiment", "training_protocol_id", "threshold",
+                "oof_score_method", "threshold_use"}
+    if report.empty or not required.issubset(report.columns):
+        raise ValueError("threshold 비교표가 비어 있거나 출처 확인 컬럼이 없습니다.")
+    if PROTOCOL_ID not in train_frame:
+        raise ValueError("threshold 출처 확인에는 원본 split 생성 계약이 필요합니다.")
+    expected = {"dataset_id": config.dataset.dataset_id, "experiment": experiment,
+                "training_protocol_id": train_frame[PROTOCOL_ID].iloc[0],
+                "oof_score_method": "single", "threshold_use": "candidate"}
+    for column, value in expected.items():
+        if report[column].isna().any() or set(report[column]) != {value}:
+            raise ValueError(f"threshold 비교표의 학습 출처 또는 방식이 일치하지 않습니다: {column}")
+    try:
+        values = report["threshold"].to_numpy(dtype=float)
+    except (TypeError, ValueError) as error:
+        raise ValueError("threshold 비교표의 threshold는 수치형이어야 합니다.") from error
+    if not np.isfinite(values).all() or ((values < 0) | (values > 1)).any():
+        raise ValueError("threshold 비교표에는 0~1의 유한한 threshold만 허용됩니다.")
+    if not np.isclose(values, threshold, rtol=1e-12, atol=0).any():
+        raise ValueError("지정한 threshold가 비교표에 없습니다. 반올림하지 않은 값을 사용하세요.")

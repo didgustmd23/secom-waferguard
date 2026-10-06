@@ -1,5 +1,5 @@
 # ==========================================
-# LightGBM 후보의 OOF 확률과 threshold별 지표 비교
+# 선택한 트리 후보의 OOF 확률과 threshold별 지표 비교
 # - 시간 holdout을 먼저 제외한 Time Train 내부에서만 OOF 확률을 생성한다.
 # - Time Validation과 Test split은 읽거나 threshold 결정에 사용하지 않는다.
 # - 이 파일은 후보별 trade-off를 기록할 뿐, 최종 threshold를 자동 확정하지 않는다.
@@ -14,20 +14,21 @@ from time import perf_counter
 
 import numpy as np
 import pandas as pd
-from sklearn.base import clone
 
 try:
     from src.modeling_config import DEFAULT_CONFIG_PATH, ModelingConfig, load_modeling_config
     from src.modeling_metrics import evaluate_binary_scores
-    from src.step4_baseline import split_frame_to_xy
-    from src.step6_feature_compare import build_experiments
+    from src.threshold_policy import validate_threshold_report
+    from src.dataset_schema import split_frame_to_xy
+    from src.modeling_models import build_pipeline, fit_pipeline, positive_scores
     from src.modeling_preprocessing import quality_filter_record, quality_filter_json
     from src.split_contract import SOURCE_ROW_ID, PROTOCOL_ID, validate_train_role, training_folds
 except ModuleNotFoundError:
     from modeling_config import DEFAULT_CONFIG_PATH, ModelingConfig, load_modeling_config
     from modeling_metrics import evaluate_binary_scores
-    from step4_baseline import split_frame_to_xy
-    from step6_feature_compare import build_experiments
+    from threshold_policy import validate_threshold_report
+    from dataset_schema import split_frame_to_xy
+    from modeling_models import build_pipeline, fit_pipeline, positive_scores
     from modeling_preprocessing import quality_filter_record, quality_filter_json
     from split_contract import SOURCE_ROW_ID, PROTOCOL_ID, validate_train_role, training_folds
 
@@ -48,7 +49,14 @@ def generate_oof_scores(
     *,
     n_jobs: int = 1,
     score_method: str = "single",
+    experiment_name: str = EXPERIMENT_NAME,
 ) -> tuple[pd.DataFrame, float]:
+    """Train 내부 교차검증으로 OOF 점수와 실행 시간을 만든다.
+
+    ``single``은 각 샘플이 한 번만 검증 fold에 나타나도록 반복 횟수를
+    1로 제한하여 threshold 후보를 만든다. ``repeated_mean``은 반복별
+    예측을 평균한 분석용 결과다. 두 방식은 결과 열에 구분해 기록한다.
+    """
     validate_train_role(train_frame)
     if score_method not in {"single", "repeated_mean"}:
         raise ValueError("OOF score_method는 single 또는 repeated_mean이어야 합니다.")
@@ -60,9 +68,7 @@ def generate_oof_scores(
     if labels.nunique() < 2:
         raise ValueError("OOF를 생성하려면 Train에 정상과 Fail label이 모두 있어야 합니다.")
 
-    experiments = build_experiments(config, n_jobs=n_jobs)
-    if EXPERIMENT_NAME not in experiments:
-        raise ValueError(f"OOF 대상 후보가 정의되어 있지 않습니다: {EXPERIMENT_NAME}")
+    experiment_pipeline = build_pipeline(config, experiment_name, n_jobs=n_jobs)
 
     score_sum = np.zeros(len(train_frame), dtype=float)
     prediction_count = np.zeros(len(train_frame), dtype=int)
@@ -71,20 +77,12 @@ def generate_oof_scores(
 
     for fit_indices, validation_indices in training_folds(features, labels, train_frame, oof_config):
         # fold별 Pipeline을 새로 만들어 imputing과 model fit이 validation에 닿지 않게 한다.
-        pipeline = clone(experiments[EXPERIMENT_NAME])
-        pipeline.fit(features.iloc[fit_indices], labels.iloc[fit_indices])
+        pipeline = fit_pipeline(
+            experiment_pipeline, features.iloc[fit_indices], labels.iloc[fit_indices],
+            config, experiment_name, n_jobs=n_jobs,
+        )
         quality_records.append(quality_filter_record(pipeline, fold=len(quality_records) + 1))
-
-        fitted_model = pipeline.named_steps["model"]
-        class_positions = [
-            index
-            for index, label in enumerate(fitted_model.classes_)
-            if label == config.dataset.positive_label
-        ]
-        if len(class_positions) != 1:
-            raise ValueError("학습된 LightGBM에서 Profile의 Fail label을 찾을 수 없습니다.")
-
-        fold_scores = pipeline.predict_proba(features.iloc[validation_indices])[:, class_positions[0]]
+        fold_scores = positive_scores(pipeline, features.iloc[validation_indices], config.dataset)
         score_sum[validation_indices] += fold_scores
         prediction_count[validation_indices] += 1
 
@@ -124,7 +122,14 @@ def compare_thresholds(
     config: ModelingConfig,
     *,
     thresholds: np.ndarray | None = None,
+    experiment_name: str = EXPERIMENT_NAME,
 ) -> pd.DataFrame:
+    """주어진 OOF 점수에 threshold 후보를 적용하고 정책 지표를 계산한다.
+
+    기본 후보는 OOF 점수 분위수로 구성하고 기본 threshold도 포함한다.
+    반환표는 후보별 Recall, Precision, 오분류 건수와 재검사 비율을 담아
+    사람이 운영 제약과 함께 threshold를 검토할 수 있도록 한다.
+    """
     required_columns = {"label", "oof_positive_score"}
     missing_columns = sorted(required_columns - set(oof_frame.columns))
     if missing_columns:
@@ -166,7 +171,7 @@ def compare_thresholds(
                 "dataset_id": config.dataset.dataset_id,
                 "split_strategy": "time_train_oof" if "training_protocol_id" in oof_frame and str(oof_frame["training_protocol_id"].iloc[0]).startswith("time:") else "legacy_train_oof",
                 "training_protocol_id": oof_frame["training_protocol_id"].iloc[0] if "training_protocol_id" in oof_frame else None,
-                "experiment": EXPERIMENT_NAME,
+                "experiment": experiment_name,
                 "oof_score_method": oof_frame["oof_score_method"].iloc[0] if "oof_score_method" in oof_frame else "unknown",
                 "threshold_use": oof_frame["threshold_use"].iloc[0] if "threshold_use" in oof_frame else "analysis_only",
                 **asdict(metrics),
@@ -175,34 +180,6 @@ def compare_thresholds(
         )
 
     return pd.DataFrame(rows).sort_values("threshold").reset_index(drop=True)
-
-
-# ==========================================
-# 시간 검증에 적용할 threshold 비교표의 출처 확인
-# - 동일한 Train 생성 계약·데이터셋·모델의 단일 OOF 후보만 허용
-# - 반복 평균 분석 결과와 legacy 출처 불명 결과는 최종 threshold 근거로 사용하지 않음
-# ==========================================
-def validate_threshold_report(report, train_frame, config, experiment, threshold):
-    required = {"dataset_id", "experiment", "training_protocol_id", "threshold",
-                "oof_score_method", "threshold_use"}
-    if report.empty or not required.issubset(report.columns):
-        raise ValueError("threshold 비교표가 비어 있거나 출처 확인 컬럼이 없습니다.")
-    if PROTOCOL_ID not in train_frame:
-        raise ValueError("threshold 출처 확인에는 원본 split 생성 계약이 필요합니다.")
-    expected = {"dataset_id": config.dataset.dataset_id, "experiment": experiment,
-                "training_protocol_id": train_frame[PROTOCOL_ID].iloc[0],
-                "oof_score_method": "single", "threshold_use": "candidate"}
-    for column, value in expected.items():
-        if report[column].isna().any() or set(report[column]) != {value}:
-            raise ValueError(f"threshold 비교표의 학습 출처 또는 방식이 일치하지 않습니다: {column}")
-    try:
-        values = report["threshold"].to_numpy(dtype=float)
-    except (TypeError, ValueError) as error:
-        raise ValueError("threshold 비교표의 threshold는 수치형이어야 합니다.") from error
-    if not np.isfinite(values).all() or ((values < 0) | (values > 1)).any():
-        raise ValueError("threshold 비교표에는 0~1의 유한한 threshold만 허용됩니다.")
-    if not np.isclose(values, threshold, rtol=1e-12, atol=0).any():
-        raise ValueError("지정한 threshold가 비교표에 없습니다. 반올림하지 않은 값을 사용하세요.")
 
 
 # ==========================================
@@ -218,13 +195,16 @@ def run_threshold_oof_from_file(
     *,
     n_jobs: int = 1,
     score_method: str = "single",
+    experiment_name: str = EXPERIMENT_NAME,
 ) -> tuple[pd.DataFrame, pd.DataFrame, float]:
+    """입력 파일을 읽어 OOF 점수·threshold 표·품질 필터 로그를 저장한다."""
     # OOF 원본과 threshold 비교표를 분리 저장해 이후 오류 사례 분석에 재사용한다.
     config = load_modeling_config(config_path)
     oof_frame, elapsed_seconds = generate_oof_scores(
-        pd.read_csv(train_path), config, n_jobs=n_jobs, score_method=score_method
+        pd.read_csv(train_path), config, n_jobs=n_jobs, score_method=score_method,
+        experiment_name=experiment_name,
     )
-    threshold_frame = compare_thresholds(oof_frame, config)
+    threshold_frame = compare_thresholds(oof_frame, config, experiment_name=experiment_name)
 
     for frame, output_path in (
         (oof_frame, oof_output_path),
@@ -245,8 +225,9 @@ def run_threshold_oof_from_file(
 
 
 def _parse_arguments() -> argparse.Namespace:
+    """OOF 생성 및 threshold 분석 CLI의 인자를 정의하고 파싱한다."""
     # 새 평가 경로에서는 integrated/time_train.csv만 입력한다.
-    parser = argparse.ArgumentParser(description="LightGBM OOF threshold 비교")
+    parser = argparse.ArgumentParser(description="후보 모델 OOF threshold 비교")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--train", type=Path, required=True)
     parser.add_argument("--oof-output", type=Path, default=Path("logs/lightgbm_oof_predictions.csv"))
@@ -254,10 +235,15 @@ def _parse_arguments() -> argparse.Namespace:
     parser.add_argument("--n-jobs", type=int, default=1)
     parser.add_argument("--score-method", choices=("single", "repeated_mean"), default="single",
                         help="single은 threshold 후보용, repeated_mean은 반복 평균 분석용입니다.")
+    parser.add_argument("--experiment", choices=("lightgbm_all", "xgboost",
+                                                    "xgboost_scale_pos_weight"),
+                        default=EXPERIMENT_NAME,
+                        help="OOF threshold를 생성할 사전 선택 후보입니다.")
     return parser.parse_args()
 
 
 def main() -> None:
+    """CLI 실행 진입점으로 비교 요약과 생성된 파일 경로를 출력한다."""
     arguments = _parse_arguments()
     _, threshold_frame, elapsed_seconds = run_threshold_oof_from_file(
         arguments.config,
@@ -266,6 +252,7 @@ def main() -> None:
         arguments.threshold_output,
         n_jobs=arguments.n_jobs,
         score_method=arguments.score_method,
+        experiment_name=arguments.experiment,
     )
     # 전체 비교표는 CSV에 저장하고, 콘솔에는 판단에 필요한 대표 후보만 표시한다.
     default_row = threshold_frame.loc[

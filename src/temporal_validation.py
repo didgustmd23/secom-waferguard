@@ -10,6 +10,7 @@ import argparse
 import json
 import sys
 from dataclasses import asdict, replace
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from time import perf_counter
 
@@ -17,93 +18,38 @@ import numpy as np
 import pandas as pd
 import sklearn
 import lightgbm
-from sklearn.base import clone
-from sklearn.model_selection import TimeSeriesSplit
 
 try:
     from src.modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
     from src.modeling_metrics import evaluate_binary_scores
     from src.threshold_policy import select_policy_threshold
     from src.modeling_preprocessing import quality_filter_record, quality_filter_json
-    from src.step4_baseline import split_frame_to_xy
-    from src.step5_model_compare import build_candidate_pipelines
-    from src.split_contract import SOURCE_ROW_ID, SPLIT_ROLE, PROTOCOL_ID, validate_train_role, validate_split_pair, training_folds
+    from src.dataset_schema import split_frame_to_xy
+    from src.modeling_models import build_candidate_pipelines, fit_pipeline, positive_scores
+    from src.split_contract import SOURCE_ROW_ID, SPLIT_ROLE, PROTOCOL_ID, validate_train_role, validate_split_pair, training_folds, temporal_folds
 except ModuleNotFoundError:
     from modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
     from modeling_metrics import evaluate_binary_scores
     from threshold_policy import select_policy_threshold
     from modeling_preprocessing import quality_filter_record, quality_filter_json
-    from step4_baseline import split_frame_to_xy
-    from step5_model_compare import build_candidate_pipelines
-    from split_contract import SOURCE_ROW_ID, SPLIT_ROLE, PROTOCOL_ID, validate_train_role, validate_split_pair, training_folds
+    from dataset_schema import split_frame_to_xy
+    from modeling_models import build_candidate_pipelines, fit_pipeline, positive_scores
+    from split_contract import SOURCE_ROW_ID, SPLIT_ROLE, PROTOCOL_ID, validate_train_role, validate_split_pair, training_folds, temporal_folds
 
 
 DEFAULT_MODELS = ("lightgbm", "lightgbm_scale_pos_weight", "random_forest",
-                  "logistic_regression_l1_balanced")
-
-
-# ==========================================
-# timestamp 단위의 확장형 학습·평가 인덱스 생성
-# - 같은 시각과 선언된 그룹·복합 ID가 경계를 넘으면 허용하지 않음
-# - 입력 행 순서와 관계없이 시간 범위가 겹치지 않는지 검증
-# ==========================================
-def temporal_folds(frame, dataset, n_splits):
-    if dataset.timestamp_column is None:
-        raise ValueError("시간 검증에는 Dataset Profile의 timestamp 컬럼이 필요합니다.")
-    times = pd.to_datetime(frame[dataset.timestamp_column],
-                           format=dataset.timestamp_format, errors="coerce")
-    if times.isna().any():
-        raise ValueError("시간 검증 입력에 timestamp 파싱 실패 또는 결측값이 있습니다.")
-    unique_times = np.sort(times.unique())
-    if n_splits < 2 or len(unique_times) <= n_splits:
-        raise ValueError("시간 fold 수는 2 이상이며 고유 timestamp 수보다 작아야 합니다.")
-    folds = []
-    for fit_times, eval_times in TimeSeriesSplit(n_splits=n_splits).split(unique_times):
-        fit_i = np.flatnonzero(times.isin(unique_times[fit_times]).to_numpy())
-        eval_i = np.flatnonzero(times.isin(unique_times[eval_times]).to_numpy())
-        train = frame.iloc[fit_i]
-        evaluation = frame.iloc[eval_i].copy()
-        # 원본 Train의 부분집합을 내부 평가로 사용하므로 복사본의 역할만 변경한다.
-        if SPLIT_ROLE in evaluation:
-            evaluation[SPLIT_ROLE] = "validation"
-        validate_split_pair(train, evaluation, dataset, temporal=True)
-        if dataset.id_columns:
-            ids = list(dataset.id_columns)
-            if train[ids].isna().any().any() or evaluation[ids].isna().any().any():
-                raise ValueError("시간 검증의 ID 컬럼에 결측값이 있습니다.")
-            if set(map(tuple, train[ids].to_numpy())) & set(map(tuple, evaluation[ids].to_numpy())):
-                raise ValueError("시간 검증 학습·평가 구간에 동일한 복합 ID가 포함됩니다.")
-        folds.append((fit_i, eval_i))
-    return folds
-
-
-def _fit_model(pipeline, features, labels, config, model_name, n_jobs):
-    # 매번 복제해 이전 fold의 전처리 상태가 다음 학습에 섞이지 않도록 한다.
-    model = clone(pipeline)
-    if model_name.startswith(("lightgbm", "random_forest")):
-        model.set_params(model__n_jobs=n_jobs)
-    if labels.nunique() != 2:
-        raise ValueError("시간 검증 학습 구간에는 정상·Fail label이 모두 필요합니다.")
-    if model_name == "lightgbm_scale_pos_weight":
-        positive = int(labels.eq(config.dataset.positive_label).sum())
-        negative = int(labels.eq(config.dataset.negative_label).sum())
-        model.set_params(model__scale_pos_weight=negative / positive)
-    model.fit(features, labels)
-    return model
-
-
-def _scores(model, features, dataset):
-    # class 열 순서를 가정하지 않고 Profile의 Fail 확률을 선택한다.
-    index = list(model.named_steps["model"].classes_).index(dataset.positive_label)
-    return model.predict_proba(features)[:, index]
+                  "logistic_regression_l1_balanced", "xgboost",
+                  "xgboost_scale_pos_weight")
 
 
 def _period(frame, dataset):
+    """설정된 timestamp 열을 결과 기록용 기간 값으로 변환한다."""
     times = pd.to_datetime(frame[dataset.timestamp_column], format=dataset.timestamp_format)
     return str(times.min()), str(times.max())
 
 
 def _quality_record(model, train, evaluation, config, outer_fold, model_name, mode, inner_fold=None):
+    """품질 필터 결과와 fold·모델·기간 정보를 기록용 사전으로 만든다."""
     # 내부 OOF를 포함한 모든 학습의 기간·표본 수·센서 제거 사유를 기록한다.
     record = quality_filter_record(model, fold=inner_fold)
     record.update(outer_fold=outer_fold, model_name=model_name, mode=mode,
@@ -134,9 +80,9 @@ def _inner_oof(train, config, pipeline, model_name, mode, outer_fold, inner_spli
         folds = training_folds(features, labels, train, single)
     predictions, records = [], []
     for inner_fold, (fit_i, eval_i) in enumerate(folds, 1):
-        model = _fit_model(pipeline, features.iloc[fit_i], labels.iloc[fit_i],
-                           config, model_name, n_jobs)
-        scores = _scores(model, features.iloc[eval_i], config.dataset)
+        model = fit_pipeline(pipeline, features.iloc[fit_i], labels.iloc[fit_i],
+                           config, model_name, n_jobs=n_jobs)
+        scores = positive_scores(model, features.iloc[eval_i], config.dataset)
         evaluation = train.iloc[eval_i]
         predictions.append(pd.DataFrame({
             "outer_fold": outer_fold, "model_name": model_name, "mode": mode,
@@ -156,6 +102,7 @@ def _inner_oof(train, config, pipeline, model_name, mode, outer_fold, inner_spli
 
 
 def _threshold_table(oof, config, metadata):
+    """OOF threshold 지표표에 해당 실행의 출처 정보를 추가한다."""
     # 동일한 101개 분위수와 기본값 후보를 사용해 OOF F1만으로 선택한다.
     candidates = np.unique(np.append(np.quantile(oof.positive_score, np.linspace(0, 1, 101)),
                                      config.experiment.default_threshold))
@@ -168,6 +115,43 @@ def _threshold_table(oof, config, metadata):
     return pd.DataFrame(rows)
 
 
+def _summarize_results(result_frame):
+    """시간 fold별 지표 평균과 합산 오류 건수를 구분하여 요약한다."""
+    # AP는 fold 평균이고 pooled 지표는 오류 건수를 합산하여 계산한다.
+    summaries = []
+    for (name, mode), rows in result_frame.groupby(["model_name", "mode"], sort=False):
+        counts = rows[["true_positive", "false_positive", "false_negative", "true_negative"]].sum()
+        tp, fp, fn, tn = (int(counts[key]) for key in counts.index)
+        summaries.append({"model_name": name, "mode": mode,
+                          "ap_mean": rows.average_precision.mean(), "ap_std": rows.average_precision.std(ddof=0),
+                          "roc_auc_mean": rows.roc_auc.mean(), "recall_mean": rows.recall.mean(),
+                          "pooled_recall": tp / (tp + fn),
+                          "pooled_precision": tp / (tp + fp) if tp + fp else 0.0,
+                          "alarm_ratio": (tp + fp) / (tp + fp + fn + tn), **counts.to_dict()})
+    return pd.DataFrame(summaries)
+
+
+def _policy_result(table, config, metadata, evaluation_labels, scores):
+    """OOF에서 정책을 선택한 뒤 미래 구간의 정책 충족 여부만 평가한다."""
+    # 미래 label은 아래 평가에만 사용하고 문턱 선택에는 전달하지 않는다.
+    policy_threshold = select_policy_threshold(table, config.threshold_policy)
+    policy_row = {**metadata, **asdict(config.threshold_policy),
+                  "policy_status": "feasible" if policy_threshold is not None else "infeasible",
+                  "threshold": policy_threshold}
+    if policy_threshold is not None:
+        # 미래 지표는 선택이 끝난 뒤에만 계산하며 선택 조건으로 사용하지 않는다.
+        policy_metrics = evaluate_binary_scores(evaluation_labels, scores,
+            positive_label=config.dataset.positive_label,
+            negative_label=config.dataset.negative_label, threshold=policy_threshold)
+        policy_row.update(asdict(policy_metrics))
+        policy_row["reinspection_ratio"] = (
+            policy_metrics.true_positive + policy_metrics.false_positive) / policy_metrics.support
+        policy_row["evaluation_meets_policy"] = (
+            policy_metrics.recall >= config.threshold_policy.min_recall and
+            policy_row["reinspection_ratio"] <= config.threshold_policy.max_reinspection_ratio)
+    return policy_row
+
+
 # ==========================================
 # 세 시간 구간에서 기본 threshold와 OOF 후보의 전이 비교
 # - 동일한 외부 fit과 예측 점수를 여러 threshold에 적용
@@ -176,12 +160,18 @@ def _threshold_table(oof, config, metadata):
 def compare_temporal(frame, config, *, outer_splits=3, inner_splits=2,
                      model_names=DEFAULT_MODELS, n_jobs=1, pipelines=None,
                      oof_modes=("stratified_oof", "temporal_oof"), fit_observer=None):
+    """내부 OOF와 바깥 시간 fold를 분리해 threshold 전이를 평가한다.
+
+    각 outer-train에서만 threshold를 정한 다음 미래 outer-validation에
+    적용한다. 바깥 validation은 threshold 탐색에 참여하지 않으며, 결과에는
+    성능·threshold·기간 및 fold별 센서 품질 기록이 포함된다.
+    """
     validate_train_role(frame)
     split_frame_to_xy(frame, config.dataset)
     if not model_names or len(set(model_names)) != len(model_names):
         raise ValueError("시간 검증 모델 목록은 중복 없이 하나 이상 지정해야 합니다.")
     # 기존 모델 비교와 특징 선택 실험이 같은 시간 분할·평가 처리를 공유한다.
-    pipelines = build_candidate_pipelines(config) if pipelines is None else pipelines
+    pipelines = build_candidate_pipelines(config, n_jobs=n_jobs) if pipelines is None else pipelines
     if not oof_modes or len(set(oof_modes)) != len(oof_modes) or not set(oof_modes).issubset({"stratified_oof", "temporal_oof"}):
         raise ValueError("내부 OOF 방식은 중복 없이 stratified_oof 또는 temporal_oof를 지정하세요.")
     unknown = set(model_names) - set(pipelines)
@@ -209,9 +199,9 @@ def compare_temporal(frame, config, *, outer_splits=3, inner_splits=2,
                         "evaluation_end": _period(evaluation, config.dataset)[1]})
         for model_name in model_names:
             started = perf_counter()
-            model = _fit_model(pipelines[model_name], train_x, train_y, config, model_name, n_jobs)
+            model = fit_pipeline(pipelines[model_name], train_x, train_y, config, model_name, n_jobs=n_jobs)
             fit_seconds = perf_counter() - started
-            scores = _scores(model, eval_x, config.dataset)
+            scores = positive_scores(model, eval_x, config.dataset)
             quality.append(_quality_record(model, train, evaluation, config,
                                            outer_fold, model_name, "outer_fit"))
             if fit_observer is not None:
@@ -226,23 +216,8 @@ def compare_temporal(frame, config, *, outer_splits=3, inner_splits=2,
                 table = _threshold_table(oof, config, metadata)
                 thresholds.append(table)
                 selected.append((mode, float(table.loc[table.f1.idxmax(), "threshold"])))
-                # 기존 F1 진단은 보존하고 정책 선택·미충족 결과를 별도 표에 기록한다.
-                policy_threshold = select_policy_threshold(table, config.threshold_policy)
-                policy_row = {**metadata, **asdict(config.threshold_policy),
-                              "policy_status": "feasible" if policy_threshold is not None else "infeasible",
-                              "threshold": policy_threshold}
-                if policy_threshold is not None:
-                    # 미래 지표는 선택이 끝난 뒤에만 계산하며 선택 조건으로 사용하지 않는다.
-                    policy_metrics = evaluate_binary_scores(eval_y, scores,
-                        positive_label=config.dataset.positive_label,
-                        negative_label=config.dataset.negative_label, threshold=policy_threshold)
-                    policy_row.update(asdict(policy_metrics))
-                    policy_row["reinspection_ratio"] = (
-                        policy_metrics.true_positive + policy_metrics.false_positive) / policy_metrics.support
-                    policy_row["evaluation_meets_policy"] = (
-                        policy_metrics.recall >= config.threshold_policy.min_recall and
-                        policy_row["reinspection_ratio"] <= config.threshold_policy.max_reinspection_ratio)
-                policy_results.append(policy_row)
+                # F1 진단과 정책 충족 평가를 별도 표로 보존한다.
+                policy_results.append(_policy_result(table, config, metadata, eval_y, scores))
                 coverage.append({**metadata, "train_samples": len(train),
                                  "oof_samples": len(oof), "excluded_initial_samples": len(train) - len(oof),
                                  "oof_fail": int(oof.label.eq(config.dataset.positive_label).sum())})
@@ -261,18 +236,8 @@ def compare_temporal(frame, config, *, outer_splits=3, inner_splits=2,
                     "predicted_fail": scores >= threshold,
                 }))
     result_frame = pd.DataFrame(results)
-    summaries = []
-    for (name, mode), rows in result_frame.groupby(["model_name", "mode"], sort=False):
-        counts = rows[["true_positive", "false_positive", "false_negative", "true_negative"]].sum()
-        tp, fp, fn, tn = (int(counts[key]) for key in counts.index)
-        summaries.append({"model_name": name, "mode": mode,
-                          "ap_mean": rows.average_precision.mean(), "ap_std": rows.average_precision.std(ddof=0),
-                          "roc_auc_mean": rows.roc_auc.mean(), "recall_mean": rows.recall.mean(),
-                          "pooled_recall": tp / (tp + fn),
-                          "pooled_precision": tp / (tp + fp) if tp + fp else 0.0,
-                          "alarm_ratio": (tp + fp) / (tp + fp + fn + tn), **counts.to_dict()})
     return {"folds": pd.DataFrame(periods), "fold_results": result_frame,
-            "summary": pd.DataFrame(summaries), "predictions": pd.concat(predictions, ignore_index=True),
+            "summary": _summarize_results(result_frame), "predictions": pd.concat(predictions, ignore_index=True),
             "oof_predictions": pd.concat(oofs, ignore_index=True),
             "oof_coverage": pd.DataFrame(coverage),
             "threshold_compare": pd.concat(thresholds, ignore_index=True),
@@ -281,6 +246,7 @@ def compare_temporal(frame, config, *, outer_splits=3, inner_splits=2,
 
 
 def main():
+    """CLI에서 시간 검증을 실행하고 결과 산출물을 저장한다."""
     parser = argparse.ArgumentParser(description="Train 내부 시간순 OOF·threshold 전이 검증")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--train", type=Path, required=True)
@@ -309,6 +275,11 @@ def main():
               "python": sys.version.split()[0], "sklearn": sklearn.__version__,
               "lightgbm": lightgbm.__version__,
               "training_protocol_id": train_frame[PROTOCOL_ID].iloc[0] if PROTOCOL_ID in train_frame else None}
+    if any(name.startswith("xgboost") for name in args.models):
+        try:
+            record["xgboost"] = version("xgboost")
+        except PackageNotFoundError:
+            record["xgboost"] = None
     (args.output_dir / "temporal_run.json").write_text(
         json.dumps(record, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     print(results["summary"].to_string(index=False))

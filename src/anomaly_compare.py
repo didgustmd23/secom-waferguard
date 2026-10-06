@@ -40,17 +40,17 @@ try:
     from src.modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
     from src.modeling_metrics import evaluate_anomaly_scores
     from src.modeling_preprocessing import preprocessing_steps, quality_filter_record, quality_filter_json
-    from src.step4_baseline import split_frame_to_xy
+    from src.dataset_schema import split_frame_to_xy
     from src.split_contract import SOURCE_ROW_ID, PROTOCOL_ID, validate_train_role
-    from src.temporal_validation import temporal_folds
+    from src.split_contract import temporal_folds
     from src.threshold_policy import policy_candidates, select_policy_threshold
 except ModuleNotFoundError:
     from modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
     from modeling_metrics import evaluate_anomaly_scores
     from modeling_preprocessing import preprocessing_steps, quality_filter_record, quality_filter_json
-    from step4_baseline import split_frame_to_xy
+    from dataset_schema import split_frame_to_xy
     from split_contract import SOURCE_ROW_ID, PROTOCOL_ID, validate_train_role
-    from temporal_validation import temporal_folds
+    from split_contract import temporal_folds
     from threshold_policy import policy_candidates, select_policy_threshold
 
 
@@ -211,6 +211,57 @@ def _thresholds(oof, config, metadata):
     return policy_candidates(pd.DataFrame(rows), config.threshold_policy, score_kind="anomaly")
 
 
+def _inner_anomaly_oof(train, config, name, inner, metadata, *, n_jobs, n_estimators):
+    """과거 구간의 정상만 학습해 시간순 내부 OOF와 학습 근거를 생성한다."""
+    parts, fit_records = [], []
+    for inner_fold, (past_i, future_i) in enumerate(inner, 1):
+        past, future = train.iloc[past_i], train.iloc[future_i]
+        # 내부 past의 정상만 학습하고 아직 학습하지 않은 내부 future를 점수화한다.
+        # 점수 계산 대상은 future의 정상·불량 전체이며 fit에는 사용하지 않는다.
+        model = fit_detector(past, config, name, n_jobs=n_jobs, n_estimators=n_estimators)
+        scores = anomaly_scores(model, future, config.dataset, name)
+        parts.append(_prediction_rows(future, config, scores, {**metadata, "inner_fold": inner_fold}))
+        fit_records.append({**_fit_record(model, past, config, {**metadata, "inner_fold": inner_fold}),
+                     "evaluation_start": _period(future, config.dataset)[0]})
+    # 4. 내부 평가 부분만 연결한다. 최초 past는 예측 대상이 아니므로 제외된다.
+    # 이 초기 행을 0점으로 채우면 OOF 결과와 threshold가 왜곡된다.
+    oof = pd.concat(parts, ignore_index=True)
+    if oof.source_row_index.duplicated().any():
+        raise RuntimeError("시간순 OOF 행이 중복 예측됐습니다.")
+    return oof, fit_records
+
+
+def _evaluate_threshold(evaluation, scores, config, threshold):
+    """사전 선택한 이상 점수 문턱으로 미래 구간의 오류 건수를 평가한다."""
+    # 미래 정답은 지표 계산에만 사용하며 이 함수에서는 문턱을 탐색하지 않는다.
+    metrics = evaluate_anomaly_scores(
+        evaluation[config.dataset.label_column], scores,
+        positive_label=config.dataset.positive_label,
+        negative_label=config.dataset.negative_label, threshold=threshold,
+    )
+    return {
+        **asdict(metrics),
+        "reinspection_ratio": (metrics.true_positive + metrics.false_positive) / metrics.support,
+    }
+
+
+def _summarize_anomalies(result):
+    """시간 구간별 이상 탐지 결과를 AP 평균과 합산 오류량으로 요약한다."""
+    summaries = []
+    for name, group in result.groupby("model_name", sort=False):
+        # 8. 외부 평가 행은 시간 구간별로 겹치지 않으므로 오류 건수를 합산한다.
+        # AP는 구간별 평균이며 합산 Recall·Precision은 건수에서 다시 계산한다.
+        # 구간마다 모델·문턱이 달라 하나의 최종 모델 성능으로 해석하면 안 된다.
+        tp, fp, fn, tn = (int(group[column].sum()) for column in
+                         ["true_positive", "false_positive", "false_negative", "true_negative"])
+        summaries.append({"model_name": name, "mode": "temporal_oof", "model_family": "anomaly",
+            "ap_mean": group.average_precision.mean(), "ap_std": group.average_precision.std(ddof=0),
+            "pooled_recall": tp / (tp + fn), "pooled_precision": tp / (tp + fp) if tp + fp else 0,
+            "alarm_ratio": (tp + fp) / (tp + fp + fn + tn),
+            "true_positive": tp, "false_positive": fp, "false_negative": fn, "true_negative": tn})
+    return pd.DataFrame(summaries)
+
+
 # ==========================================
 # 지도학습과 같은 세 외부 시간 구간에서 이상 탐지 비교
 # - F1 최대값은 진단용이고 정책 미충족 시 정책 기반 평가를 만들지 않음
@@ -258,22 +309,12 @@ def compare_anomalies(frame, config, *, outer_splits=3, inner_splits=2,
         for name in DETECTORS:
             metadata = {"dataset_id": config.dataset.dataset_id, "outer_fold": outer,
                         "model_name": name, "mode": "temporal_oof", "score_kind": "anomaly"}
-            # parts에는 현재 outer·현재 모델의 내부 OOF만 모은다.
-            parts = []
-            for inner_fold, (past_i, future_i) in enumerate(inner, 1):
-                past, future = train.iloc[past_i], train.iloc[future_i]
-                # 내부 past의 정상만 학습하고 아직 학습하지 않은 내부 future를 점수화한다.
-                # 점수 계산 대상은 future의 정상·불량 전체이며 fit에는 사용하지 않는다.
-                model = fit_detector(past, config, name, n_jobs=n_jobs, n_estimators=n_estimators)
-                scores = anomaly_scores(model, future, config.dataset, name)
-                parts.append(_prediction_rows(future, config, scores, {**metadata, "inner_fold": inner_fold}))
-                fits.append({**_fit_record(model, past, config, {**metadata, "inner_fold": inner_fold}),
-                             "evaluation_start": _period(future, config.dataset)[0]})
-            # 4. 내부 평가 부분만 연결한다. 최초 past는 예측 대상이 아니므로 제외된다.
-            # 이 초기 행을 0점으로 채우면 OOF 결과와 threshold가 왜곡된다.
-            oof = pd.concat(parts, ignore_index=True)
-            if oof.source_row_index.duplicated().any():
-                raise RuntimeError("시간순 OOF 행이 중복 예측됐습니다.")
+            # 초기 미예측 구간은 제외한 OOF와 정상 전용 fit 기록을 받는다.
+            oof, inner_fits = _inner_anomaly_oof(
+                train, config, name, inner, metadata,
+                n_jobs=n_jobs, n_estimators=n_estimators,
+            )
+            fits.extend(inner_fits)
             oofs.append(oof)
             table = _thresholds(oof, config, metadata)
             thresholds.append(table)
@@ -295,42 +336,20 @@ def compare_anomalies(frame, config, *, outer_splits=3, inner_splits=2,
             fits.append({**_fit_record(model, train, config, {**metadata, "inner_fold": None}),
                          "evaluation_start": _period(evaluation, config.dataset)[0]})
             predictions.append(_prediction_rows(evaluation, config, scores, metadata))
-            # ==========================================
-            # 선택이 끝난 문턱으로 같은 다음 구간 점수를 평가
-            # - 바깥에서 생성한 evaluation·scores를 읽는 지역 함수
-            # - 정답은 여기서 지표 계산에만 사용하며 문턱을 다시 고르지 않음
-            # ==========================================
-            def evaluate(threshold):
-                metrics = evaluate_anomaly_scores(evaluation[config.dataset.label_column], scores,
-                    positive_label=config.dataset.positive_label, negative_label=config.dataset.negative_label,
-                    threshold=threshold)
-                return {**asdict(metrics), "reinspection_ratio": (metrics.true_positive + metrics.false_positive) / metrics.support}
             # 7. F1 진단 결과는 항상 기록하되 정책 통과 결과와 구분한다.
             results.append({**metadata, "threshold_rule": "oof_max_f1_diagnostic", "fit_seconds": elapsed,
-                            **evaluate(diagnostic)})
+                            **_evaluate_threshold(evaluation, scores, config, diagnostic)})
             policy = {**metadata, **asdict(config.threshold_policy), "threshold": chosen,
                       "policy_status": "feasible" if chosen is not None else "infeasible"}
             if chosen is not None:
                 # OOF에서 조건을 충족해도 다음 구간에서는 미충족일 수 있으므로 재확인한다.
-                policy.update(evaluate(chosen))
+                policy.update(_evaluate_threshold(evaluation, scores, config, chosen))
                 policy["evaluation_meets_policy"] = (policy["recall"] >= config.threshold_policy.min_recall and
                     policy["reinspection_ratio"] <= config.threshold_policy.max_reinspection_ratio)
             # chosen=None이면 정책 미충족만 기록하고 미래 정책 지표는 만들지 않는다.
             policies.append(policy)
     result = pd.DataFrame(results)
-    summaries = []
-    for name, group in result.groupby("model_name", sort=False):
-        # 8. 외부 평가 행은 시간 구간별로 겹치지 않으므로 오류 건수를 합산한다.
-        # AP는 구간별 평균이며 합산 Recall·Precision은 건수에서 다시 계산한다.
-        # 구간마다 모델·문턱이 달라 하나의 최종 모델 성능으로 해석하면 안 된다.
-        tp, fp, fn, tn = (int(group[column].sum()) for column in
-                         ["true_positive", "false_positive", "false_negative", "true_negative"])
-        summaries.append({"model_name": name, "mode": "temporal_oof", "model_family": "anomaly",
-            "ap_mean": group.average_precision.mean(), "ap_std": group.average_precision.std(ddof=0),
-            "pooled_recall": tp / (tp + fn), "pooled_precision": tp / (tp + fp) if tp + fp else 0,
-            "alarm_ratio": (tp + fp) / (tp + fp + fn + tn),
-            "true_positive": tp, "false_positive": fp, "false_negative": fn, "true_negative": tn})
-    return {"folds": pd.DataFrame(periods), "fold_results": result, "summary": pd.DataFrame(summaries),
+    return {"folds": pd.DataFrame(periods), "fold_results": result, "summary": _summarize_anomalies(result),
             "predictions": pd.concat(predictions, ignore_index=True),
             "oof_predictions": pd.concat(oofs, ignore_index=True),
             "threshold_compare": pd.concat(thresholds, ignore_index=True),

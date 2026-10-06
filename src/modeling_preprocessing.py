@@ -26,11 +26,17 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 # - 제거 사유별 목록은 중복 없이 기록하며 입력 DataFrame을 보존
 # ==========================================
 class SensorQualityFilter(TransformerMixin, BaseEstimator):
+    """학습 구간에서 불량 센서를 찾고 동일한 열 집합을 이후 데이터에 적용한다.
+
+    결측률 기준 초과 센서를 먼저 제거하고 남은 센서 중 관측된 고유값이
+    1개 이하인 센서를 제거한다. 변환 시 평가 데이터로 기준을 재계산하지 않는다.
+    """
     def __init__(self, missing_ratio_threshold=0.5, drop_zero_variance=True):
         self.missing_ratio_threshold = missing_ratio_threshold
         self.drop_zero_variance = drop_zero_variance
 
     def fit(self, X, y=None):
+        """입력 학습 데이터의 결측률과 상수 여부를 계산해 유지 열을 기억한다."""
         # 센서 이름으로 선택하므로 이름이 중복되지 않은 DataFrame을 사용한다.
         if not isinstance(X, pd.DataFrame) or not X.columns.is_unique:
             raise ValueError("센서 품질 필터에는 컬럼명이 중복되지 않은 DataFrame이 필요합니다.")
@@ -56,6 +62,7 @@ class SensorQualityFilter(TransformerMixin, BaseEstimator):
         return self
 
     def transform(self, X):
+        """학습 시 유지하기로 한 열만 원래 순서대로 반환한다."""
         check_is_fitted(self, "retained_features_")
         # 평가 데이터의 결측률이나 상수 여부를 다시 계산하지 않는다.
         if not isinstance(X, pd.DataFrame):
@@ -66,6 +73,7 @@ class SensorQualityFilter(TransformerMixin, BaseEstimator):
         return X.loc[:, list(self.retained_features_)].copy()
 
     def get_feature_names_out(self, input_features=None):
+        """필터 이후 남은 특징 이름을 scikit-learn API 형식으로 돌려준다."""
         check_is_fitted(self, "retained_features_")
         return np.asarray(self.retained_features_, dtype=object)
 
@@ -75,6 +83,7 @@ class SensorQualityFilter(TransformerMixin, BaseEstimator):
 # - CV 호출자는 fold 번호와 함께 각 학습 결과를 모아 기록
 # ==========================================
 def quality_filter_record(pipeline, *, fold=None):
+    """fit된 Pipeline의 센서 제거 기준·개수·이름을 기록용 사전으로 만든다."""
     quality = pipeline.named_steps["quality_filter"]
     return {
         "fold": fold,
@@ -91,21 +100,30 @@ def quality_filter_record(pipeline, *, fold=None):
 
 
 def quality_filter_json(records):
+    """품질 기록 목록을 한글 센서명도 보존하는 JSON 문자열로 직렬화한다."""
     # JSON 배열로 fold별 수치와 센서명을 함께 보존해 평균값의 정보 손실을 방지한다.
     return json.dumps(records, ensure_ascii=False)
 
 
 def _numeric_columns(frame, *, categorical_columns):
+    """Dataset 설정에서 범주형으로 지정되지 않은 변환 후 열을 반환한다."""
     # 숫자로 저장된 범주형 컬럼도 Profile 선언을 우선하여 수치형에서 제외한다.
     return [column for column in frame.columns if column not in categorical_columns]
 
 
 def _categorical_columns(frame, *, categorical_columns):
+    """Dataset 설정에 선언된 범주형 열 중 현재 입력에 있는 열을 반환한다."""
     # 품질 필터가 제거한 범주형 컬럼은 ColumnTransformer에 전달하지 않는다.
     return [column for column in frame.columns if column in categorical_columns]
 
 
 def preprocessing_steps(dataset, *, scale=False, pandas_output=False):
+    """Dataset Profile에 맞는 품질 필터·대치·인코딩 Pipeline 단계를 만든다.
+
+    모든 변환기는 반환된 Pipeline의 fit 시점에만 통계를 학습하므로 CV
+    fold별 전처리를 보장한다. ``scale``은 수치형 표준화 여부이며,
+    ``pandas_output``은 선택기에서 특징 이름을 추적해야 할 때 사용한다.
+    """
     quality_steps = [("quality_filter", SensorQualityFilter(
         dataset.missing_ratio_threshold, dataset.drop_zero_variance
     ))]
@@ -138,6 +156,7 @@ def preprocessing_steps(dataset, *, scale=False, pandas_output=False):
 
 
 def fitted_feature_count(pipeline):
+    """학습된 Pipeline의 selector 또는 최종 모델이 받은 특징 수를 반환한다."""
     # 선택기 또는 최종 모델이 실제로 받은 변환 후 특징 수를 기록한다.
     if "selector" in pipeline.named_steps:
         selector = pipeline.named_steps["selector"]
@@ -145,3 +164,11 @@ def fitted_feature_count(pipeline):
             return int(selector.n_components_)
         return int(selector.get_support().sum())
     return int(pipeline.named_steps["model"].n_features_in_)
+
+
+def checked_top_k(features, *, count):
+    """현재 fold에서 변환된 특징 수를 기준으로 Top-K 설정을 검증한다."""
+    # One-Hot Encoding 이후의 실제 fold 입력 크기로 Top-K를 검사한다.
+    if count > features.shape[1]:
+        raise ValueError(f"Top-K feature 수가 변환 후 feature 수보다 큽니다: {count} > {features.shape[1]}")
+    return count

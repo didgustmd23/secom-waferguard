@@ -2,7 +2,7 @@
 
 > 전처리 변경: 공통 Pipeline 앞단에 학습 데이터 기준 결측률 초과·상수 센서 제거와 제거 로그를 추가했다. 1~20절은 필터 적용 전의 탐색 기록이며, 필터 적용 후 Step 4~9 재실행 결과는 21절, 코드화한 시간순 내부 검증 결과는 22절에 기록했다.
 
-> 기준 시점: 2026-10-06 센서 품질 필터 적용 후 Step 4~9 및 Time Train 내부 시간순 검증 재실행 완료. 아래 수치는 최종 Test 성능이 아니다.
+> 기준 시점: 2026-10-06 센서 품질 필터 적용 후 Step 4~9 및 Time Train 내부 시간순 검증 재실행 완료. XGBoost 추가 비교는 25절에 기록했다. 아래 수치는 최종 Test 성능이 아니다.
 
 > 평가 해석 정정: 기존 Time Validation 235행 중 163행이 Random Train에도 포함되어 후보 비교·OOF 탐색에 사용됐다. 아래 수치는 탐색 기록이며 독립적인 미사용 holdout 성능이 아니다. 새 실행 경로는 시간 holdout을 먼저 분리하고 동일한 Time Train만 사용한다. 기존 `0.000475`는 승계하지 않으며, 평균 OOF와 단일 재학습 모델의 확률 척도 차이도 있으므로 성능 하락을 drift만으로 단정하지 않는다. 이미 관찰한 데이터는 재분할해도 미사용 데이터가 되지 않는다.
 
@@ -612,4 +612,86 @@ LightGBM의 기본 split 중요도와 RF의 불순도 감소 중요도는 척도
 
 평가 fit 45회와 전체 Train 후보 fit 5회의 품질 제거 기록·특징 수를 저장했다. 선택된 센서명이 Pipeline의 실제 입력과 일치하는지, Top-K가 정확히 50·20개인지, 외부/내부 빈도 분모가 3·6인지, 후보가 최종으로 표시되지 않는지 테스트했다. 전체 110개 테스트가 통과했다. `reports/analysis.ipynb` 7절에서 비교 표와 선택 빈도 그래프를 확인한다.
 
-축소 비교와 연구용 센서 자료 준비는 완료했다. 최종 모델·센서 집합 합의와 비전체 모델을 채택할 경우 OOF·시간 검증·오류 분석·실행기의 모델 연결은 남아 있다. 기존 `run_evaluation.py`의 대상은 여전히 `lightgbm_all`이다. 딥러닝 교과 평가가 추가됐으므로 MLP 비교도 최종 설정 동결 전에 별도로 수행해야 한다.
+축소 비교와 연구용 센서 자료 준비는 완료했다. 최종 모델·센서 집합 합의와 비전체 모델을 채택할 경우 OOF·시간 검증·오류 분석·실행기의 모델 연결은 남아 있다. 이 축소 실험 당시 `run_evaluation.py`의 대상은 `lightgbm_all`이었으며, 이후 XGBoost 연결과 비교를 추가했다(25절). 딥러닝 교과 평가가 추가됐으므로 MLP 비교도 최종 설정 동결 전에 별도로 수행해야 한다.
+
+## 25. XGBoost 추가 비교 (2026-10-06)
+
+### 실험 조건
+
+동일한 `data/splits/integrated/time_train.csv` 1,096행(정상 1,018행·Fail 78행)만 사용했다. 기존 실험과 split 생성 계약이 같으며, 외부 Time Validation과 최종 Test는 이번에 읽거나 평가하지 않았다.
+
+- 후보 비교: 5-fold × 5-repeats, seed 42, threshold 0.50.
+- 품질 필터: 학습 fold에서 결측률 50% 초과·상수 센서를 제거한 뒤 중앙값 대치. 반복 CV에서 두 XGBoost 후보 모두 444개 센서를 사용했다.
+- XGBoost: 트리 300개, 깊이 3, learning rate 0.05, subsample·colsample_bytree 0.8, reg_lambda 1.0, `tree_method=hist`. 이번 실험에서는 튜닝·SMOTE를 적용하지 않았다.
+- 가중치 후보: 각 학습 구간에서 계산한 정상/Fail 건수 비율을 `scale_pos_weight`로 적용했다.
+- threshold 정책: 최소 Recall 90%·최대 재검사율 20%. 미충족 시 임의 문턱으로 대체하지 않는다.
+- 환경: Python 3.10.22, scikit-learn 1.5.2, LightGBM 4.5.0, XGBoost 2.1.3, pandas 2.2.3.
+
+모델 설정과 fold별 학습 근거는 `logs/xgboost_20261006/temporal/temporal_run.json` 및 `quality_filter.csv`에 저장했다. 반복 CV는 모델 내부 병렬 수 1, 시간순·단일 OOF는 2로 실행했다. 실험들을 병행했으므로 학습 시간은 엄밀한 속도 비교 자료가 아니다.
+
+### 반복 CV — 기존 후보를 포함한 재실행
+
+| 모델 | AP 평균 ± 표준편차 | Recall 평균 (threshold 0.50) | ROC-AUC 평균 |
+| --- | ---: | ---: | ---: |
+| XGBoost 기본 | 0.2490 ± 0.0827 | 1.27% | 0.7541 |
+| LightGBM 기본 | 0.2424 ± 0.0665 | 0.27% | 0.7628 |
+| XGBoost 가중치 | 0.2410 ± 0.0834 | 8.97% | 0.7467 |
+| LightGBM 가중치 | 0.2374 ± 0.0692 | 1.53% | 0.7523 |
+| Random Forest | 0.2324 ± 0.0590 | 0.25% | 0.7531 |
+| RBF SVM | 0.1716 ± 0.0361 | 0.00% | 0.6880 |
+| L1 Logistic Regression | 0.1690 ± 0.0493 | 16.37% | 0.6576 |
+| L1 Logistic Regression balanced | 0.1688 ± 0.0489 | 25.10% | 0.6514 |
+
+XGBoost 기본 모델의 AP가 가장 높았지만 LightGBM과의 차이는 약 0.0066이다. 표준편차는 신뢰구간이 아니며 반복 CV fold도 독립 표본이 아니므로, 이 순위만으로 통계적 우위나 최종 후보 확정을 주장하지 않는다. XGBoost 가중치는 0.50에서 Recall을 높였지만 AP는 기본 모델보다 낮았다. 기존 여섯 모델의 지표 평균·표준편차는 이전 로그와 모두 일치했다.
+
+원본: `logs/xgboost_20261006/model_compare.csv`.
+
+### Train 내부 시간순 검증
+
+과거 학습 → 다음 시간 구간 평가를 세 번 수행했다. 외부 평가 대상은 합계 824행(Fail 39행)이며, 최초 학습 구간은 평가에 포함하지 않는다. 각 과거 학습 구간 안에서만 계층 단일 OOF와 시간순 OOF를 만들었다. 시간순 OOF의 초기 미예측 91·182·272행은 제외하고 기록했다.
+
+아래 Recall·재검사율은 시간순 내부 OOF의 F1 최대 진단 문턱을 다음 구간에 적용한 합산 결과다. 정책을 충족한 문턱이나 하나의 최종 모델 성능이 아니다.
+
+| 모델 | 시간 구간 AP 평균 ± 표준편차 | 합산 Recall | 합산 Precision | 재검사율 | TP / FP / FN |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| LightGBM 기본 | 0.1233 ± 0.0886 | 58.97% | 8.13% | 34.34% | 23 / 260 / 16 |
+| LightGBM 가중치 | 0.1201 ± 0.0912 | 69.23% | 6.82% | 48.06% | 27 / 369 / 12 |
+| XGBoost 기본 | 0.1553 ± 0.0649 | 53.85% | 7.89% | 32.28% | 21 / 245 / 18 |
+| XGBoost 가중치 | 0.1749 ± 0.1332 | 71.79% | 6.21% | 54.73% | 28 / 423 / 11 |
+
+XGBoost 가중치의 AP는 세 구간에서 0.1412 → 0.0312 → 0.3522로 크게 변했다. 평균만 보면 가장 높지만 중간 구간에서는 낮았고, 진단 Recall 증가에는 높은 재검사 부담이 따랐다. 기본 XGBoost의 AP 역시 0.1342 → 0.0886 → 0.2432로 변했다. 성능 하락의 원인을 drift 하나로 단정하지 않는다.
+
+네 모델 × 세 외부 구간 × 두 내부 OOF 방식의 정책 선택 24건은 모두 90%·20% 조건 미충족이었다. LightGBM 두 후보의 시간순 요약 지표는 기존 실험과 일치했다.
+
+원본: `logs/xgboost_20261006/temporal/summary.csv`, `fold_results.csv`, `policy_selection.csv`.
+
+### 전체 Time Train의 단일 OOF — 운영 제약 비교
+
+두 XGBoost 후보 모두 1회 5-fold로 샘플당 한 번의 OOF 확률을 생성했다. AP는 기본 0.1877, 가중치 0.1798이었다. 이 AP는 fold별 AP를 평균한 반복 CV 지표와 계산 방식이 다르다.
+
+저장된 101개 분위수와 기본 threshold 후보 중, Recall 90% 이상에서 재검사율이 가장 낮은 후보를 비교했다.
+
+| 모델 | 실제 Recall | 재검사율 | TP | FP | FN | 90%·20% 충족 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| LightGBM 기본 — 기존 단일 OOF | 91.03% | 66.97% | 71 | 663 | 7 | 아니오 |
+| XGBoost 기본 | 91.03% | 63.96% | 71 | 630 | 7 | 아니오 |
+| XGBoost 가중치 | 91.03% | 67.97% | 71 | 674 | 7 | 아니오 |
+
+기본 XGBoost는 같은 TP 71·FN 7에서 LightGBM보다 정상 재검사를 33건 줄였다. 다만 상한 20%와는 여전히 차이가 크다. 재검사율 20% 이하의 저장 후보 중 최대 Recall은 XGBoost 기본 46.15%(TP 36·FP 162·FN 42), 가중치 42.31%(TP 33·FP 176·FN 45)였다.
+
+이 결과는 저장된 후보 격자 안의 비교이며 모든 가능한 threshold의 정확한 최적값을 뜻하지 않는다. 상세 문턱은 각 `threshold_compare.csv`의 반올림하지 않은 값을 확인한다. 정책 통과 후보가 없으므로 최종 threshold·모델을 확정하거나 외부 Validation을 추가 평가하지 않았다.
+
+원본: `logs/xgboost_20261006/xgboost/`, `logs/xgboost_20261006/xgboost_scale_pos_weight/`.
+
+### 재현 명령과 다음 단계
+
+아래는 이번 실행 조건이다. 시간순 실험을 재실행할 때는 비어 있는 새 출력 폴더를 지정한다.
+
+```powershell
+python src/step5_model_compare.py --train data/splits/integrated/time_train.csv --output logs/xgboost_20261006/model_compare.csv
+python src/temporal_validation.py --train data/splits/integrated/time_train.csv --output-dir logs/xgboost_20261006/temporal --models lightgbm lightgbm_scale_pos_weight xgboost xgboost_scale_pos_weight --n-jobs 2
+python src/step8_threshold_oof.py --train data/splits/integrated/time_train.csv --experiment xgboost --oof-output logs/xgboost_20261006/xgboost/oof_predictions.csv --threshold-output logs/xgboost_20261006/xgboost/threshold_compare.csv --score-method single --n-jobs 2
+python src/step8_threshold_oof.py --train data/splits/integrated/time_train.csv --experiment xgboost_scale_pos_weight --oof-output logs/xgboost_20261006/xgboost_scale_pos_weight/oof_predictions.csv --threshold-output logs/xgboost_20261006/xgboost_scale_pos_weight/threshold_compare.csv --score-method single --n-jobs 2
+```
+
+현재 판단은 **XGBoost 기본 모델을 후속 비교 후보로 유지하되, 운영 가능 모델로 확정하지 않는다**이다. 가중치도 비교 기록으로 보존한다. 다음 필수 확장은 같은 Train·학습 fold 내부 전처리·시간순 검증을 사용하는 MLP 딥러닝 비교다. 정책 합의와 최종 모델·threshold 동결 전까지 Test를 사용하지 않는다.

@@ -13,62 +13,29 @@ from time import perf_counter
 
 import numpy as np
 import pandas as pd
-from lightgbm import LGBMClassifier
-from sklearn.base import clone
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import Pipeline
-from sklearn.svm import SVC
 
 try:
-    from src.modeling_config import DEFAULT_CONFIG_PATH, ModelingConfig, load_modeling_config
+    from src.modeling_config import (
+        DEFAULT_CONFIG_PATH, ModelingConfig, load_modeling_config, SUPPORTED_CANDIDATE_MODELS,
+    )
     from src.modeling_metrics import evaluate_binary_scores
-    from src.step4_baseline import split_frame_to_xy
-    from src.modeling_preprocessing import preprocessing_steps, quality_filter_record, quality_filter_json
+    from src.modeling_models import (build_candidate_pipelines, candidate_base_name,
+                                     fit_pipeline, positive_scores)
+    from src.dataset_schema import split_frame_to_xy
+    from src.modeling_preprocessing import (quality_filter_record,
+                                           quality_filter_json)
     from src.split_contract import PROTOCOL_ID, validate_train_role, training_folds
 except ModuleNotFoundError:
-    from modeling_config import DEFAULT_CONFIG_PATH, ModelingConfig, load_modeling_config
+    from modeling_config import (
+        DEFAULT_CONFIG_PATH, ModelingConfig, load_modeling_config, SUPPORTED_CANDIDATE_MODELS,
+    )
     from modeling_metrics import evaluate_binary_scores
-    from step4_baseline import split_frame_to_xy
-    from modeling_preprocessing import preprocessing_steps, quality_filter_record, quality_filter_json
+    from modeling_models import (build_candidate_pipelines, candidate_base_name,
+                                 fit_pipeline, positive_scores)
+    from dataset_schema import split_frame_to_xy
+    from modeling_preprocessing import (quality_filter_record,
+                                       quality_filter_json)
     from split_contract import PROTOCOL_ID, validate_train_role, training_folds
-
-
-# ==========================================
-# 후보별 Pipeline 생성
-# - 선형 모델과 SVM에는 scaling을 적용하고 tree 모델에는 적용하지 않음
-# - 모든 Pipeline은 CV fold의 train index에서만 fit됨
-# ==========================================
-def build_candidate_pipelines(config: ModelingConfig) -> dict[str, Pipeline]:
-    # 모든 후보에 같은 난수 시드를 사용해 성능 차이가 모델 조건에서만 나도록 한다.
-    seed = config.experiment.cv.random_state
-    return {
-        # L1은 희소 feature 선택 효과와 선형 기준 성능을 함께 확인한다.
-        "logistic_regression_l1": Pipeline([
-            *preprocessing_steps(config.dataset, scale=True),
-            ("model", LogisticRegression(penalty="l1", solver="liblinear", max_iter=2000, random_state=seed)),
-        ]),
-        "logistic_regression_l1_balanced": Pipeline([
-            *preprocessing_steps(config.dataset, scale=True),
-            ("model", LogisticRegression(penalty="l1", solver="liblinear", class_weight="balanced", max_iter=2000, random_state=seed)),
-        ]),
-        "rbf_svm": Pipeline([
-            *preprocessing_steps(config.dataset, scale=True),
-            ("model", SVC(kernel="rbf", probability=True, random_state=seed)),
-        ]),
-        "random_forest": Pipeline([
-            *preprocessing_steps(config.dataset),
-            ("model", RandomForestClassifier(n_estimators=300, random_state=seed, n_jobs=1)),
-        ]),
-        "lightgbm": Pipeline([
-            *preprocessing_steps(config.dataset),
-            ("model", LGBMClassifier(n_estimators=300, random_state=seed, n_jobs=1, verbosity=-1)),
-        ]),
-        "lightgbm_scale_pos_weight": Pipeline([
-            *preprocessing_steps(config.dataset),
-            ("model", LGBMClassifier(n_estimators=300, random_state=seed, n_jobs=1, verbosity=-1)),
-        ]),
-    }
 
 
 # ==========================================
@@ -77,9 +44,15 @@ def build_candidate_pipelines(config: ModelingConfig) -> dict[str, Pipeline]:
 # - Test 및 외부 Validation의 정보는 모델 선택 과정에 사용하지 않음
 # ==========================================
 def compare_candidates(train_frame: pd.DataFrame, config: ModelingConfig) -> pd.DataFrame:
+    """Train 데이터에서 반복 교차검증으로 후보 모델을 비교한다.
+
+    Validation/Test 데이터는 입력받지 않는다. 각 fold의 학습 구간으로
+    Pipeline을 새로 학습하고, 보류한 fold에서 확률 기반 지표를 계산한다.
+    결과에는 지표의 평균·표준편차와 학습 시간, 센서 제거 기록을 포함한다.
+    """
     validate_train_role(train_frame)
     # 직접 생성한 설정도 파일 로더와 동일하게 후보 이름을 검사한다.
-    supported = {"logistic_regression_l1", "rbf_svm", "random_forest", "lightgbm"}
+    supported = SUPPORTED_CANDIDATE_MODELS
     unknown = sorted(set(config.candidate_models) - supported)
     if unknown:
         raise ValueError(f"지원하지 않는 후보 모델입니다: {unknown}")
@@ -97,27 +70,23 @@ def compare_candidates(train_frame: pd.DataFrame, config: ModelingConfig) -> pd.
     records: list[dict[str, object]] = []
 
     for model_name, pipeline in build_candidate_pipelines(config).items():
-        base_model_name = model_name.removesuffix("_balanced").removesuffix("_scale_pos_weight")
+        base_model_name = candidate_base_name(model_name)
         if base_model_name not in config.candidate_models:
             continue
         fold_metrics: list[dict[str, float]] = []
         fit_times: list[float] = []
         quality_records = []
         for fit_index, valid_index in training_folds(train_x, train_y, train_frame, config):
-            model = clone(pipeline)
-            # LightGBM의 불량 가중치는 현재 CV 학습 fold의 class 수로만 계산한다.
-            if model_name == "lightgbm_scale_pos_weight":
-                fit_labels = train_y.iloc[fit_index]
-                positive_count = int((fit_labels == config.dataset.positive_label).sum())
-                negative_count = int((fit_labels == config.dataset.negative_label).sum())
-                model.set_params(model__scale_pos_weight=negative_count / positive_count)
+            # 복제·불균형 가중치는 현재 학습 fold에서만 적용한다.
             started_at = perf_counter()
-            model.fit(train_x.iloc[fit_index], train_y.iloc[fit_index])
+            model = fit_pipeline(
+                pipeline, train_x.iloc[fit_index], train_y.iloc[fit_index],
+                config, model_name,
+            )
             fit_times.append(perf_counter() - started_at)
             # 제거 개수와 센서명은 해당 fold 학습 결과에서 가져온다.
             quality_records.append(quality_filter_record(model, fold=len(quality_records) + 1))
-            positive_index = list(model.named_steps["model"].classes_).index(config.dataset.positive_label)
-            scores = model.predict_proba(train_x.iloc[valid_index])[:, positive_index]
+            scores = positive_scores(model, train_x.iloc[valid_index], config.dataset)
             metrics = evaluate_binary_scores(
                 train_y.iloc[valid_index], scores,
                 positive_label=config.dataset.positive_label,
@@ -151,6 +120,7 @@ def compare_candidates(train_frame: pd.DataFrame, config: ModelingConfig) -> pd.
 
 
 def main() -> None:
+    """명령행 인자를 읽어 후보 비교 결과를 CSV로 저장한다."""
     # Train 파일만 받아 후보 비교 결과를 재생성 가능한 CSV로 기록한다.
     parser = argparse.ArgumentParser(description="반복 계층 CV 후보 모델 비교")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)

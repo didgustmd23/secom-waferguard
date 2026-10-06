@@ -64,7 +64,7 @@ Model freeze → Final test (once) → Model bundle
   - **이유:** SECOM 외 tabular 데이터에도 같은 split·평가·Pipeline 코어를 적용하고, 새 데이터셋 추가 시 모델 코드가 특정 데이터셋에 종속되지 않게 하기 위해서다.
 - 후보 모델 비교는 Test를 제외한 학습 데이터에서 `RepeatedStratifiedKFold(5 folds × 5 repeats, random_state=42)`로 수행한다. 후보 비교의 threshold는 `0.50`으로 고정하며, 최종 threshold는 Day 4 OOF prediction에서만 결정한다.
   - **이유:** 약 104개의 적은 Fail 표본으로 한 번의 split에 의존하지 않기 위해 반복 계층 CV를 사용한다. 모델 비교와 운영 threshold 결정을 분리해 공정한 비교를 유지하고, Test set의 사후 최적화를 막는다.
-- Baseline은 `SimpleImputer(median) → StandardScaler → LogisticRegression` Pipeline으로 구현한다. 후보는 L1 Logistic Regression, RBF SVM, Random Forest, LightGBM으로 구성한다.
+- Baseline은 `SimpleImputer(median) → StandardScaler → LogisticRegression` Pipeline으로 구현한다. 후보는 L1 Logistic Regression, RBF SVM, Random Forest, LightGBM, XGBoost로 구성한다. XGBoost는 기본 학습과 fold별 `scale_pos_weight` 적용을 비교한다.
   - **이유:** Baseline은 결측·스케일 차이가 있는 고차원 수치 데이터에서 빠르고 해석 가능한 기준점이 된다. 후보 모델은 희소 선형 관계, 비선형 경계, 센서 간 상호작용을 각각 검증하기 위해 선택한다.
 - PCA는 누적 설명분산 90% 기준으로 비교한다. L1과 Feature Importance 기반 Top-K(100/50/30/20/10) 선택은 반드시 각 CV 학습 fold 내부에서 fit한다.
   - **이유:** PCA·L1·Importance는 각각 분산 보존, 희소 센서 선택, 공정 해석 가능성 측면의 장단점이 다르다. 선택기를 검증 fold까지 포함해 fit하면 센서 선택 자체가 데이터 누수가 되므로 학습 fold 안에서만 fit한다.
@@ -130,6 +130,7 @@ Model freeze → Final test (once) → Model bundle
 - [x] Logistic Regression, SVM, Random Forest, LightGBM 비교
 - [x] `class_weight` 또는 `scale_pos_weight` 적용 비교
 - [x] Repeated Stratified K-Fold로 평균 ± 표준편차 기록
+- [ ] XGBoost 기본·`scale_pos_weight` 후보를 같은 CV fold에서 비교
 
 ### 공동
 
@@ -151,6 +152,8 @@ Model freeze → Final test (once) → Model bundle
 
 - [x] OOF prediction 생성
 - [x] Threshold별 Recall, Precision, FN, FP 비교
+- [ ] XGBoost 후보가 선정되면 해당 모델의 OOF threshold 시나리오 비교
+- [x] 모델 비교·특징 선택·OOF·시간 검증·오류 분석 및 공통 전처리 코드에 한국어 함수 설명 보강
 - [ ] FN/FP trade-off를 바탕으로 최종 threshold 결정
 - [ ] Isolation Forest와 PCA reconstruction error를 보조 실험으로 비교
 

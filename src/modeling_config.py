@@ -17,6 +17,11 @@ from typing import Any, Final
 # src/ 기준 상위 프로젝트 루트의 공통 실험 설정 경로
 DEFAULT_CONFIG_PATH: Final = Path(__file__).resolve().parents[1] / "config.json"
 
+# 설정 검증과 모델 생성이 공유하는 기본 후보 이름; 무거운 모델 모듈은 import하지 않는다.
+SUPPORTED_CANDIDATE_MODELS = frozenset({
+    "logistic_regression_l1", "rbf_svm", "random_forest", "lightgbm", "xgboost",
+})
+
 
 # ==========================================
 # 원본 데이터 source 하나의 위치와 CSV 읽기 옵션
@@ -477,7 +482,7 @@ def load_modeling_config(config_path: Path | str = DEFAULT_CONFIG_PATH) -> Model
     if not candidate_models or not all(isinstance(model, str) for model in candidate_models):
         raise ValueError("models.candidates에는 모델 이름이 하나 이상 있어야 합니다")
     # 이름 오타가 후보를 조용히 제외하거나 빈 결과의 KeyError로 이어지지 않게 차단한다.
-    supported_models = {"logistic_regression_l1", "rbf_svm", "random_forest", "lightgbm"}
+    supported_models = SUPPORTED_CANDIDATE_MODELS
     unknown_models = sorted(set(candidate_models) - supported_models)
     if unknown_models:
         raise ValueError(f"models.candidates에 지원하지 않는 모델이 있습니다: {unknown_models}")

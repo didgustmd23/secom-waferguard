@@ -41,7 +41,8 @@
       "logistic_regression_l1",
       "rbf_svm",
       "random_forest",
-      "lightgbm"
+      "lightgbm",
+      "xgboost"
     ]
   }
 }
