@@ -1,7 +1,8 @@
 # ==========================================
 # 전체·Top-50·Top-20의 시간순 성능과 센서 선택 안정성 비교
-# - LightGBM 분류기는 동일하게 유지하고 선택 중요도 모델만 비교
+# - 실험군 안에서 최종 분류기는 동일하게 유지하고 선택 중요도 모델만 비교
 # - LightGBM 중요도와 원본 과제의 RF 중요도 선택을 모두 실험
+# - 명시한 XGBoost 전체·Top-K도 공통 모델 정의로 같은 시간순 코어에서 평가
 # - 선택기는 각 과거 학습 fold의 Pipeline 안에서만 fit
 # - 최종 센서가 아닌 후보 목록을 전체 Time Train에서 별도로 준비
 # - 외부 Validation·최종 Test를 읽지 않음
@@ -18,6 +19,7 @@ import argparse
 import json
 from dataclasses import asdict
 from functools import partial
+from importlib.metadata import version
 from pathlib import Path
 
 import numpy as np
@@ -32,7 +34,7 @@ try:
     from src.modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
     from src.modeling_preprocessing import preprocessing_steps, quality_filter_record, quality_filter_json
     from src.dataset_schema import split_frame_to_xy
-    from src.modeling_models import build_classifier, fit_pipeline
+    from src.modeling_models import build_classifier, build_pipeline, fit_pipeline, XGBoostClassifierAdapter
     from src.modeling_preprocessing import checked_top_k
     from src.temporal_validation import compare_temporal
     from src.split_contract import PROTOCOL_ID
@@ -40,7 +42,7 @@ except ModuleNotFoundError:
     from modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
     from modeling_preprocessing import preprocessing_steps, quality_filter_record, quality_filter_json
     from dataset_schema import split_frame_to_xy
-    from modeling_models import build_classifier, fit_pipeline
+    from modeling_models import build_classifier, build_pipeline, fit_pipeline, XGBoostClassifierAdapter
     from modeling_preprocessing import checked_top_k
     from temporal_validation import compare_temporal
     from split_contract import PROTOCOL_ID
@@ -51,7 +53,7 @@ except ModuleNotFoundError:
 # - RF selector + LightGBM 분류기로 선택 방법의 차이를 분리
 # - 불균형 가중치와 scaling 등 다른 조건을 동시에 바꾸지 않음
 # ==========================================
-def build_feature_pipelines(config, *, n_jobs=1, n_estimators=300):
+def build_feature_pipelines(config, *, n_jobs=1, n_estimators=300, experiment_names=None):
     if isinstance(n_estimators, bool) or not isinstance(n_estimators, int) or n_estimators < 1:
         raise ValueError("트리 수는 양의 정수여야 합니다.")
     # 모든 최종 분류기의 설정이 같아야 센서 축소에 따른 차이를 해석할 수 있다.
@@ -69,7 +71,27 @@ def build_feature_pipelines(config, *, n_jobs=1, n_estimators=300):
             name = f"lightgbm_top_{count}" if method == "lightgbm" else f"lightgbm_rf_top_{count}"
             pipelines[name] = Pipeline(preprocessing_steps(config.dataset, pandas_output=True) +
                                         [("selector", selector), ("model", clone(classifier))])
-    return pipelines
+    if experiment_names is None:
+        # 옵션을 생략하면 기존 LightGBM 전체·Top-50/20 실험을 그대로 유지한다.
+        return pipelines
+    if not experiment_names or len(set(experiment_names)) != len(experiment_names):
+        raise ValueError("시간순 특징 실험 이름은 중복 없이 하나 이상 지정해야 합니다.")
+    xgboost_names = {"xgboost_all"} | {
+        f"{prefix}{count}" for prefix in ("xgboost_top_", "xgboost_rf_top_")
+        for count in config.top_k_feature_counts
+    }
+    unknown = set(experiment_names) - set(pipelines) - xgboost_names
+    if unknown:
+        raise ValueError(f"지원하지 않는 시간순 특징 실험입니다: {sorted(unknown)}")
+    chosen = {}
+    for name in experiment_names:
+        pipeline = pipelines[name] if name in pipelines else build_pipeline(config, name, n_jobs=n_jobs)
+        # 선택용 모델과 최종 분류기에 같은 트리 수를 적용해 CLI 설정을 일관되게 반영한다.
+        params = {key: n_estimators for key in pipeline.get_params(deep=True)
+                  if key.endswith("__n_estimators")}
+        pipeline.set_params(**params)
+        chosen[name] = pipeline
+    return chosen
 
 
 # ==========================================
@@ -87,7 +109,12 @@ def selection_rows(pipeline, metadata):
         mask = selector.get_support()
         selected = np.asarray(names)[mask]
         importance = selector.estimator_.feature_importances_[mask]
-        method = "rf_importance" if isinstance(selector.estimator_, RandomForestClassifier) else "lightgbm_importance"
+        if isinstance(selector.estimator_, RandomForestClassifier):
+            method = "rf_importance"
+        elif isinstance(selector.estimator_, XGBoostClassifierAdapter):
+            method = f"xgboost_{selector.estimator_.importance_type}"
+        else:
+            method = "lightgbm_importance"
     else:
         # 전체 모델에는 중요도 순위 선택이 없으므로 순위는 입력 순서이고 중요도는 결측이다.
         selected = pipeline[:-1].get_feature_names_out()
@@ -123,8 +150,9 @@ def feature_frequency(selected):
 # - 기록용 hook은 fit 결과를 조회할 뿐 예측 계산을 바꾸지 않음
 # - 외부 fit 3회·내부 OOF fit 6회의 센서 목록과 빈도를 별도로 저장
 # ==========================================
-def compare_feature_time(frame, config, *, n_jobs=1, n_estimators=300):
-    pipelines = build_feature_pipelines(config, n_jobs=n_jobs, n_estimators=n_estimators)
+def compare_feature_time(frame, config, *, n_jobs=1, n_estimators=300, experiment_names=None):
+    pipelines = build_feature_pipelines(config, n_jobs=n_jobs, n_estimators=n_estimators,
+                                       experiment_names=experiment_names)
     selected = []
     # 시간 검증 코어에 기록용 hook을 전달해 같은 학습을 중복 실행하지 않는다.
     def record_selection(model, train, evaluation, outer, name, mode, inner):
@@ -164,12 +192,15 @@ def main():
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--n-jobs", type=int, default=1)
     parser.add_argument("--n-estimators", type=int, default=300)
+    parser.add_argument("--experiments", nargs="+",
+                        help="실행할 특징 실험 이름. 생략하면 기존 LightGBM 전체·Top-50/20을 비교합니다.")
     args = parser.parse_args()
     if args.output_dir.exists() and any(args.output_dir.iterdir()):
         raise ValueError("결과 폴더가 비어 있지 않습니다. 새 폴더를 지정하세요.")
     config = load_modeling_config(args.config)
     train = pd.read_csv(args.train)
-    results = compare_feature_time(train, config, n_jobs=args.n_jobs, n_estimators=args.n_estimators)
+    results = compare_feature_time(train, config, n_jobs=args.n_jobs, n_estimators=args.n_estimators,
+                                   experiment_names=args.experiments)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     for name, table in results.items():
         # 센서 목록의 JSON 변환은 저장용 복사본에만 적용한다.
@@ -181,7 +212,12 @@ def main():
     record = {"config": asdict(config), "train_path": str(args.train.resolve()), "n_estimators": args.n_estimators,
               "n_jobs": args.n_jobs, "outer_splits": 3, "inner_temporal_splits": 2,
               "training_protocol_id": train[PROTOCOL_ID].iloc[0] if PROTOCOL_ID in train else None,
-              "sklearn": sklearn.__version__, "candidate_lists_are_final": False}
+              "sklearn": sklearn.__version__, "candidate_lists_are_final": False,
+              "models": results["summary"].model_name.unique().tolist(),
+              "versions": {name: version(name) for name in ("scikit-learn", "lightgbm")}}
+    # 기존 LightGBM 실험만 실행할 때는 선택하지 않은 XGBoost 설치를 강제하지 않는다.
+    if any(name.startswith("xgboost") for name in record["models"]):
+        record["versions"]["xgboost"] = version("xgboost")
     (args.output_dir / "feature_run.json").write_text(json.dumps(record, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     print(results["summary"].to_string(index=False))
     print(f"결과 저장 경로: {args.output_dir}")

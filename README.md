@@ -13,12 +13,12 @@
 | 범용 설정 코어 | 완료 | `config.json`과 Dataset Profile을 분리해 로드·검증 |
 | 데이터 구조 검증 | 완료 | Profile 기준 label·metadata·feature 컬럼 검증 |
 | 공통 평가 | 완료 | Profile label 기반 Recall, AP, Precision, F1, ROC-AUC 계산 |
-| 자동 테스트 | 완료 | 설정·schema·평가·전처리·split 계약·실험 함수 및 모델 코어 118개 테스트 |
+| 자동 테스트 | 완료 | 설정·schema·평가·전처리·split 계약·실험 함수 및 모델 코어 123개 테스트 |
 | 데이터 병합·품질 점검 | 완료 | Profile 기반 canonical 병합과 재생성 가능한 품질 로그 |
 | Random / Time split | 구현 완료 | 팀원의 `step3_split.py`에 Profile·누수 검사·원본 ID를 통합. Random은 탐색용, 후보 비교·OOF는 Time Train 사용 |
 | Baseline | 완료 | Train/Validation 기반 Logistic Regression 평가 및 공통 지표 기록 |
 | 후보 모델·불균형 비교 | 비교 완료 | XGBoost 기본·`scale_pos_weight`를 포함한 8개 후보 재실행. 기본 XGBoost CV AP 0.2490; 최종 후보 미확정 |
-| 특징 선택 비교 | 완료 | PCA 90%, L1 선택, LightGBM Top-K(100/50/30/20/10)를 CV 학습 fold 내부에서 비교 |
+| 특징 선택 비교 | 비교 완료 | PCA·L1·LightGBM Top-K 및 XGBoost/RF 선택 Top-20 비교. RF Top-20의 CV AP 0.2459, 시간순 AP 0.1177로 성능 유지 미확인·센서 동결 대기 |
 | 시간 변화 진단 | 완료 | Time Train/Validation drift 우선순위: 높음 242개, 중간 102개, 낮음 246개 |
 | Time Validation | 완료 | LightGBM 전체 특성 및 L1 선택 후보의 시간 구간 일반화 성능 확인 |
 | OOF threshold 비교 | 비교 완료 | LightGBM 및 XGBoost 두 후보의 단일 OOF·재검사 부담 기록. XGBoost도 90%·20% 정책 미충족 |
@@ -255,6 +255,22 @@ python src/step2_data_check.py
 `step2_data_check.py`는 결측률·상수 feature·timestamp·label 분포를 `logs/dataset_log.csv`에 기록합니다. 이 결과는 전체 데이터의 EDA 후보 정보일 뿐이며, 이를 사용해 `secom_cleaned.csv`를 만들거나 모델 feature를 전역에서 제거하지 않습니다. 실제 결측 처리와 feature 선택은 Train/CV 학습 fold 안에서만 fit하여 데이터 누수를 방지합니다. 두 CSV 산출물은 원본과 Profile만 있으면 재생성 가능하므로 Git에서 추적하지 않습니다.
 
 ### 모델링 실험
+
+XGBoost의 전체 센서·gain 중요도 Top-20·RF 중요도 Top-20은 아래 명령으로 비교합니다. 최종 분류기는 모두 같은 XGBoost이며 전처리·선택은 학습 fold 내부에서만 fit합니다. `--experiments`를 생략하면 기존 PCA·L1·LightGBM 비교 목록을 실행합니다. `--details-dir`는 비어 있는 새 폴더를 지정하며 fold별 지표·선택 센서·설정을 저장합니다.
+
+```powershell
+python src/step6_feature_compare.py --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_top_20 xgboost_rf_top_20 --output logs/xgboost_top20_run/feature_compare.csv --details-dir logs/xgboost_top20_run/details --n-jobs 2
+```
+
+반복 CV AP는 전체 444개 **0.2490**, RF 선택 20개 **0.2459**, XGBoost 선택 20개 **0.2044**였습니다. 성능 동등성이나 최종 센서 집합은 확정하지 않았습니다. 현재는 최종 분류기에 20개가 들어가는 구조로, 원본 20개만 받는 추론 Pipeline은 아직 준비하지 않았습니다. 실제 결과는 `logs/xgboost_top20_20261006/`와 [보고서 26절](reports/report.md#26-xgboost-센서-선택-방법별-top-20-비교-2026-10-06)에 기록했습니다. 이번 비교에서 외부 Validation·Test 및 threshold 정책은 변경하지 않았습니다.
+
+후속 시간순 검증은 같은 코어에서 전체 XGBoost와 RF Top-20만 지정해 실행할 수 있습니다. 과거 학습→다음 구간 평가 3회와 각 과거 구간의 내부 시간순 OOF 2회를 사용하며, 선택 센서·OOF threshold·정책 미충족을 별도로 기록합니다.
+
+```powershell
+python src/feature_time_compare.py --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_rf_top_20 --output-dir logs/xgboost_top20_time_run --n-jobs 2
+```
+
+실제 시간 구간 평균 AP는 전체 **0.1553**, RF Top-20 **0.1177**이었으며 세 구간 모두 전체 모델이 높았습니다. 과거 OOF의 F1 최대 진단 문턱을 다음 구간에 적용하면 RF Top-20의 합산 Recall은 69.23%지만 양성 판정 비율도 59.47%였습니다. 90%·20% 정책은 두 모델·세 구간 모두 미충족으로, “20개로 같은 성능 유지”는 아직 입증하지 못했습니다. 결과는 `logs/xgboost_top20_time_20261006/`와 [보고서 27절](reports/report.md#27-xgboost-전체-vs-rf-top-20-시간순-검증-2026-10-06)에 기록했으며 외부 Validation·Test는 사용하지 않았습니다.
 
 시간순 센서 축소 비교는 `src/feature_time_compare.py`로 실행합니다. 전체 센서·LightGBM 중요도 Top-50/20·RF 중요도 Top-50/20을 동일한 LightGBM 분류기로 비교합니다. 선택기는 각 학습 fold 내부에서만 fit하며 기존 시간 검증 코어의 외부 3구간·내부 시간순 OOF 2구간을 재사용합니다.
 

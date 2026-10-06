@@ -37,7 +37,8 @@ class XGBoostClassifierAdapter(ClassifierMixin, BaseEstimator):
     def __init__(self, positive_label=1, negative_label=-1,
                  n_estimators=300, max_depth=3, learning_rate=0.05,
                  subsample=0.8, colsample_bytree=0.8, reg_lambda=1.0,
-                 scale_pos_weight=1.0, random_state=42, n_jobs=1):
+                 scale_pos_weight=1.0, random_state=42, n_jobs=1,
+                 importance_type="gain"):
         self.positive_label = positive_label
         self.negative_label = negative_label
         self.n_estimators = n_estimators
@@ -49,6 +50,8 @@ class XGBoostClassifierAdapter(ClassifierMixin, BaseEstimator):
         self.scale_pos_weight = scale_pos_weight
         self.random_state = random_state
         self.n_jobs = n_jobs
+        # 선택 기준을 명시적으로 보관한다. gain은 평균 학습 손실 개선량이다.
+        self.importance_type = importance_type
 
     def fit(self, X, y):
         """원래 label을 인코딩하고 XGBoost 분류기를 학습한다."""
@@ -85,6 +88,7 @@ class XGBoostClassifierAdapter(ClassifierMixin, BaseEstimator):
             scale_pos_weight=self.scale_pos_weight,
             random_state=self.random_state,
             n_jobs=self.n_jobs,
+            importance_type=self.importance_type,
         )
         self.estimator_.fit(X, encoded_y)
         return self
@@ -118,6 +122,7 @@ EXPERIMENT_ALIASES = {
     "l1_balanced_pca90": "logistic_regression_l1_balanced",
     "l1_balanced_l1_select": "logistic_regression_l1_balanced",
     "lightgbm_all": "lightgbm",
+    "xgboost_all": "xgboost",
 }
 WEIGHTED_VARIANTS = {"lightgbm_scale_pos_weight", "xgboost_scale_pos_weight"}
 
@@ -161,12 +166,21 @@ def build_classifier(config, name, *, n_jobs=1, n_estimators=300):
 
 def build_pipeline(config, name, *, n_jobs=1):
     """모델·특징 선택 실험 이름 하나를 독립된 Pipeline으로 변환한다."""
-    # 기존 lightgbm_top_K 이름의 K는 설정에 선언된 실험만 허용한다.
-    top_k_names = {f"lightgbm_top_{count}": count for count in config.top_k_feature_counts}
-    model_name = EXPERIMENT_ALIASES.get(name, "lightgbm" if name in top_k_names else name)
+    # 분류기와 선택기를 구분한다. RF Top-K 실험도 최종 분류기는 XGBoost다.
+    # K는 기존 설정 목록을 사용하므로 특정 데이터셋이나 센서 20개에 고정하지 않는다.
+    top_k_specs = {}
+    for prefix, final_model, importance_model in (
+        ("lightgbm_top_", "lightgbm", "lightgbm"),
+        ("xgboost_top_", "xgboost", "xgboost"),
+        ("xgboost_rf_top_", "xgboost", "random_forest"),
+    ):
+        for count in config.top_k_feature_counts:
+            top_k_specs[f"{prefix}{count}"] = (final_model, importance_model, count)
+    selection = top_k_specs.get(name)
+    model_name = EXPERIMENT_ALIASES.get(name, selection[0] if selection else name)
     classifier = build_classifier(config, model_name, n_jobs=n_jobs)
     scale = model_name.startswith("logistic_regression") or model_name == "rbf_svm"
-    feature_experiment = name in EXPERIMENT_ALIASES or name in top_k_names
+    feature_experiment = name in EXPERIMENT_ALIASES or selection is not None
     steps = preprocessing_steps(config.dataset, scale=scale, pandas_output=feature_experiment)
 
     # 선택기를 전처리 뒤에 넣어 해당 학습 fold의 변환된 특징만 보게 한다.
@@ -177,10 +191,12 @@ def build_pipeline(config, name, *, n_jobs=1):
         )))
     elif name == "l1_balanced_l1_select":
         steps.append(("selector", SelectFromModel(clone(classifier))))
-    elif name in top_k_names:
+    elif selection is not None:
+        # 전체 특징으로 학습하는 선택용 모델과 20개 등 축소 특징의 분류기는 별개다.
+        importance = build_classifier(config, selection[1], n_jobs=n_jobs)
         steps.append(("selector", SelectFromModel(
-            clone(classifier), threshold=-np.inf,
-            max_features=partial(checked_top_k, count=top_k_names[name]),
+            importance, threshold=-np.inf,
+            max_features=partial(checked_top_k, count=selection[2]),
         )))
     return Pipeline(steps + [("model", classifier)])
 
