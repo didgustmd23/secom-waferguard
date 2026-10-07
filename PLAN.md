@@ -96,10 +96,10 @@ Model freeze → Final test (once) → Model bundle
 
 ### A — 이종수 (데이터·분석)
 
-- [ ] 클래스 분포·결측률·Timestamp EDA 및 시각화
-- [ ] Random Train/Validation/Test = 70/15/15 split, stratify 적용
-- [ ] Timestamp 기준 time-based split 생성
-- [ ] Split별 클래스 비율을 `logs/split_summary.csv`에 기록
+- [x] 클래스 분포·결측률·Timestamp EDA 및 시각화
+- [x] random Train/Validation/Test = 70/15/15 split, stratify 적용
+- [x] timestamp 기준 time-based split 생성
+- [x] split별 클래스 비율을 `logs/split_summary.csv`에 기록
 
 ### B — 양현승 (모델링·평가)
 
@@ -119,8 +119,8 @@ Model freeze → Final test (once) → Model bundle
 
 ### A — 이종수 (데이터·분석)
 
-- [ ] PCA 누적 설명분산과 Feature Importance 시각화
-- [ ] 센서 수와 AP의 관계 분석
+- [x] PCA 누적 설명분산과 Feature Importance 시각화
+- [x] 센서 수와 AP의 관계 분석
 
 ### B — 양현승 (모델링·평가)
 
@@ -144,9 +144,9 @@ Model freeze → Final test (once) → Model bundle
 
 ### A — 이종수 (데이터·분석)
 
-- [ ] False Negative/False Positive 사례 분석
-- [ ] Random split과 time-based split의 성능 비교
-- [ ] 주요 센서의 시간 변화와 drift 가능성 점검
+- [X] False Negative/False Positive 사례 분석
+- [X] Random split과 time-based split의 성능 비교
+- [X] 주요 센서의 시간 변화와 drift 가능성 점검
 
 ### B — 양현승 (모델링·평가)
 
