@@ -13,7 +13,7 @@ from tempfile import TemporaryDirectory
 import pandas as pd
 
 from src.modeling_config import load_modeling_config
-from src.step7_time_validation import compare_time_validation, compare_time_validation_from_files
+from src.experiments.step7_time_validation import compare_time_validation, compare_time_validation_from_files
 
 
 class TimeValidationComparisonTest(unittest.TestCase):

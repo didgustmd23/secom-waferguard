@@ -12,7 +12,7 @@ from pathlib import Path
 import pandas as pd
 
 from src.modeling_config import DatasetSpec
-from src.step2_data_check import build_quality_log
+from src.data_pipeline.step2_data_check import build_quality_log
 
 
 class Step2DataCheckTest(unittest.TestCase):

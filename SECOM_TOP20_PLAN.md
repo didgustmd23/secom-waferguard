@@ -146,13 +146,13 @@ RF 불순도 중요도는 고유값이 많은 특징에 편향될 수 있다. �
 `--rf-stability-repeats 10`으로 활성화한다. 기본값 0은 기존 S0~S2 경로를 유지한다. 선택 CSV에는 `selection_method=rf_stability`, `bootstrap_selection_frequency`, `bootstrap_mean_rank`, `bootstrap_repeats`를 기록하고 `bootstrap_records.csv`에는 재표집별 제거 개수·행 수를 남긴다. RF 중요도 평균은 설명용이며 최종 선정 순위는 빈도·평균 순위를 따른다.
 
 ```powershell
-python src/step6_feature_compare.py --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_rf_top_20 --rf-stability-repeats 10 --output logs/s3_rf_top20_cv/feature_compare.csv --details-dir logs/s3_rf_top20_cv/details --n-jobs 2
+python -m src.experiments.step6_feature_compare --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_rf_top_20 --rf-stability-repeats 10 --output logs/s3_rf_top20_cv/feature_compare.csv --details-dir logs/s3_rf_top20_cv/details --n-jobs 2
 ```
 
 CV 완료 후 시간순 검증을 실행한다.
 
 ```powershell
-python src/feature_time_compare.py --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_rf_top_20 --rf-stability-repeats 10 --output-dir logs/s3_rf_top20_time --n-jobs 2
+python -m src.experiments.feature_time_compare --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_rf_top_20 --rf-stability-repeats 10 --output-dir logs/s3_rf_top20_time --n-jobs 2
 ```
 
 반복 수를 줄이거나 RF leaf·깊이를 함께 변경하면 다른 실험 조건으로 별도 기록한다. RF 학습 횟수가 늘어 S0보다 오래 걸릴 수 있다. 재실행은 새 결과 폴더를 사용한다. 사용자 실행 결과를 확인해 진행 기록과 보고서 30절에 정리했다. 이번 문서 정리에서는 실험을 새로 실행하지 않았으며 최종 Test·후보 확정도 수행하지 않았다.
@@ -187,13 +187,13 @@ M1은 S0/M0 대비 최종 모델 설정 개선을 비교하는 실험이다. 전
 1. 반복 CV:
 
 ```powershell
-python src/step6_feature_compare.py --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_rf_top_20 --rf-min-samples-leaf 1 --rf-stability-repeats 0 --topk-xgb-max-depth 2 --output logs/m1_s0_top20_cv/feature_compare.csv --details-dir logs/m1_s0_top20_cv/details --n-jobs 2
+python -m src.experiments.step6_feature_compare --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_rf_top_20 --rf-min-samples-leaf 1 --rf-stability-repeats 0 --topk-xgb-max-depth 2 --output logs/m1_s0_top20_cv/feature_compare.csv --details-dir logs/m1_s0_top20_cv/details --n-jobs 2
 ```
 
 2. CV 완료 후 시간순 검증:
 
 ```powershell
-python src/feature_time_compare.py --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_rf_top_20 --rf-min-samples-leaf 1 --rf-stability-repeats 0 --topk-xgb-max-depth 2 --output-dir logs/m1_s0_top20_time --n-jobs 2
+python -m src.experiments.feature_time_compare --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_rf_top_20 --rf-min-samples-leaf 1 --rf-stability-repeats 0 --topk-xgb-max-depth 2 --output-dir logs/m1_s0_top20_time --n-jobs 2
 ```
 
 새 결과 폴더를 사용한다. 완료 후 기존 `logs/s0_rf_top20_cv/`·`logs/s0_rf_top20_time/`와 평균·구간별 AP, 진단 FN/FP·양성 비율, 학습 비용을 비교한다. 작은 합성 데이터와 설정 전달 테스트로 준비를 검증하며 실제 SECOM 실험은 사용자가 실행한다.
@@ -232,15 +232,15 @@ M3의 시간순 평균 AP는 Top-20 M0보다 약 9.61% 높고 세 구간 모두 
 M2 반복 CV 후 시간순 검증:
 
 ```powershell
-python src/step6_feature_compare.py --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_rf_top_20 --rf-min-samples-leaf 1 --rf-stability-repeats 0 --topk-xgb-reg-lambda 5 --output logs/m2_s0_top20_cv/feature_compare.csv --details-dir logs/m2_s0_top20_cv/details --n-jobs 2
-python src/feature_time_compare.py --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_rf_top_20 --rf-min-samples-leaf 1 --rf-stability-repeats 0 --topk-xgb-reg-lambda 5 --output-dir logs/m2_s0_top20_time --n-jobs 2
+python -m src.experiments.step6_feature_compare --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_rf_top_20 --rf-min-samples-leaf 1 --rf-stability-repeats 0 --topk-xgb-reg-lambda 5 --output logs/m2_s0_top20_cv/feature_compare.csv --details-dir logs/m2_s0_top20_cv/details --n-jobs 2
+python -m src.experiments.feature_time_compare --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_rf_top_20 --rf-min-samples-leaf 1 --rf-stability-repeats 0 --topk-xgb-reg-lambda 5 --output-dir logs/m2_s0_top20_time --n-jobs 2
 ```
 
 M2 완료 후 M3 반복 CV·시간순 검증:
 
 ```powershell
-python src/step6_feature_compare.py --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_rf_top_20 --rf-min-samples-leaf 1 --rf-stability-repeats 0 --topk-xgb-max-depth 2 --topk-xgb-reg-lambda 5 --output logs/m3_s0_top20_cv/feature_compare.csv --details-dir logs/m3_s0_top20_cv/details --n-jobs 2
-python src/feature_time_compare.py --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_rf_top_20 --rf-min-samples-leaf 1 --rf-stability-repeats 0 --topk-xgb-max-depth 2 --topk-xgb-reg-lambda 5 --output-dir logs/m3_s0_top20_time --n-jobs 2
+python -m src.experiments.step6_feature_compare --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_rf_top_20 --rf-min-samples-leaf 1 --rf-stability-repeats 0 --topk-xgb-max-depth 2 --topk-xgb-reg-lambda 5 --output logs/m3_s0_top20_cv/feature_compare.csv --details-dir logs/m3_s0_top20_cv/details --n-jobs 2
+python -m src.experiments.feature_time_compare --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_rf_top_20 --rf-min-samples-leaf 1 --rf-stability-repeats 0 --topk-xgb-max-depth 2 --topk-xgb-reg-lambda 5 --output-dir logs/m3_s0_top20_time --n-jobs 2
 ```
 
 각 명령이 성공한 뒤 다음 명령을 실행한다. 새 결과 폴더를 사용하며 M3까지 완료 후 기존 S0/M0와 M1~M3의 평균·구간별 AP, 진단 FN/FP·양성 비율, 정책 충족 여부, 학습 비용을 비교해 보고서에 기록한다. 작은 합성 데이터 테스트는 실행 준비 검증이며 실제 SECOM 실험 결과가 아니다.
@@ -296,10 +296,10 @@ python src/feature_time_compare.py --train data/splits/integrated/time_train.csv
 
 ### M3·M0 단일 OOF 비교 실행 준비
 
-`src/top20_oof_compare.py`로 두 후보를 한 번의 명령으로 비교한다. M3는 S0 RF Top-20 뒤의 XGBoost 깊이 2·정규화 5, M0는 깊이 3·정규화 1이며 RF 선택기는 동일하다. 기존 OOF 코어를 재사용하고 반복 횟수만 1로 제한해 각 Time Train 샘플에 한 번의 미학습 예측을 생성한다. SECOM 설정에서는 단일 계층 5-fold이며 시간 순서 OOF는 아니다. 외부 Validation·Test는 읽지 않는다.
+`src/experiments/top20_oof_compare.py`로 두 후보를 한 번의 명령으로 비교한다. M3는 S0 RF Top-20 뒤의 XGBoost 깊이 2·정규화 5, M0는 깊이 3·정규화 1이며 RF 선택기는 동일하다. 기존 OOF 코어를 재사용하고 반복 횟수만 1로 제한해 각 Time Train 샘플에 한 번의 미학습 예측을 생성한다. SECOM 설정에서는 단일 계층 5-fold이며 시간 순서 OOF는 아니다. 외부 Validation·Test는 읽지 않는다.
 
 ```powershell
-python src/top20_oof_compare.py --train data/splits/integrated/time_train.csv --output-dir logs/m3_m0_oof_compare --recall-targets 0.70 0.80 0.90 --alarm-limit 0.20 --n-jobs 2
+python -m src.experiments.top20_oof_compare --train data/splits/integrated/time_train.csv --output-dir logs/m3_m0_oof_compare --recall-targets 0.70 0.80 0.90 --alarm-limit 0.20 --n-jobs 2
 ```
 
 - `oof_predictions.csv`: 두 후보의 행별 OOF 확률·원본 행 ID·fold·예측 횟수. 예측 횟수는 모두 1이어야 한다.
@@ -313,10 +313,10 @@ python src/top20_oof_compare.py --train data/splits/integrated/time_train.csv --
 
 ### S0·M3 고정 문턱 시간순 Validation 실행 준비
 
-현재 80%·40% 정책에서 선택한 OOF 후보는 `0.036539457738399506`이다. `src/top20_time_validation.py`는 저장된 OOF 확률로 정책 선택을 다시 확인하고, OOF 실행 기록의 S0·M3 파라미터를 복원하여 전체 Time Train에서만 전처리·선택·분류기를 학습한다. Validation에서는 같은 문턱으로 평가만 하며 OOF를 재학습하거나 최종 Test를 읽지 않는다.
+현재 80%·40% 정책에서 선택한 OOF 후보는 `0.036539457738399506`이다. `src/experiments/top20_time_validation.py`는 저장된 OOF 확률로 정책 선택을 다시 확인하고, OOF 실행 기록의 S0·M3 파라미터를 복원하여 전체 Time Train에서만 전처리·선택·분류기를 학습한다. Validation에서는 같은 문턱으로 평가만 하며 OOF를 재학습하거나 최종 Test를 읽지 않는다.
 
 ```powershell
-python src/top20_time_validation.py --train data/splits/integrated/time_train.csv --validation data/splits/integrated/time_valid.csv --oof-dir logs/m3_m0_oof_compare --threshold 0.036539457738399506 --output-dir logs/m3_policy80_40_time_validation --n-jobs 2
+python -m src.experiments.top20_time_validation --train data/splits/integrated/time_train.csv --validation data/splits/integrated/time_valid.csv --oof-dir logs/m3_m0_oof_compare --threshold 0.036539457738399506 --output-dir logs/m3_policy80_40_time_validation --n-jobs 2
 ```
 
 새 폴더에 `time_validation.csv`(지표·양성 비율·정책 충족 여부), `selected_features.csv`(전체 Train에서 선택한 센서), `execution.json`(설정·문턱·실제 모델 파라미터·출처)을 저장한다. 전체 Train의 센서 목록은 OOF fold별 목록과 같을 필요가 없다. 기존 로그를 덮어쓰지 않으며 실행은 사용자가 수행한다. 정책 외 설정이나 Train 행·label·생성 계약이 달라지면 기존 OOF 재사용을 차단한다. 이 검사는 센서 값 자체의 변경까지 감지하는 해시 검사는 아니므로 원본 Train 파일을 변경했다면 OOF부터 재생성해야 한다.
@@ -326,7 +326,7 @@ python src/top20_time_validation.py --train data/splits/integrated/time_train.cs
 사용자가 공유한 고정 문턱 시간 검증 결과는 Recall 5.88%, 양성 판정 비율 8.09%, AP 0.077252, TP 1·FP 18·FN 16이었다. 이 결과만으로 시간 drift나 센서 축소가 원인이라고 단정하지 않는다. 동일한 모델·문턱의 정상·불량별 확률 분포와 OOF fold/전체 Train 선택 센서의 교집합을 먼저 확인한다.
 
 ```powershell
-python src/top20_time_validation.py --train data/splits/integrated/time_train.csv --validation data/splits/integrated/time_valid.csv --oof-dir logs/m3_m0_oof_compare --threshold 0.036539457738399506 --output-dir logs/m3_policy80_40_diagnostics --n-jobs 2 --diagnostics --figure-dir reports/figures/m3_policy80_40_diagnostics
+python -m src.experiments.top20_time_validation --train data/splits/integrated/time_train.csv --validation data/splits/integrated/time_valid.csv --oof-dir logs/m3_m0_oof_compare --threshold 0.036539457738399506 --output-dir logs/m3_policy80_40_diagnostics --n-jobs 2 --diagnostics --figure-dir reports/figures/m3_policy80_40_diagnostics
 ```
 
 기존 실행에는 행별 확률이 없으므로 같은 설정으로 전체 Train 학습과 Validation 예측을 한 번 재실행한다. OOF는 재학습하지 않고 최종 Test는 읽지 않는다. 새 `validation_predictions.csv`를 보존하고, `score_metrics.csv`, `score_distribution.csv`, `sensor_overlap.csv`, `diagnostics.md`와 `reports/figures`의 누적분포 그림을 생성한다. 문턱 재탐색이나 개선 모델 비교는 포함하지 않는다. 이 진단은 OOF의 여러 fold 모델과 전체 Train 모델의 차이도 포함하므로 drift 원인 확정 자료가 아니다.
@@ -336,17 +336,17 @@ python src/top20_time_validation.py --train data/splits/integrated/time_train.cs
 `--compare-all`은 기존 S0·M3 경로와 동일한 분류기 파라미터의 전체 센서 M3 경로를 평가한다. 두 모델은 같은 Train·Validation·품질 필터·중앙값 대치를 사용하며 RF Top-20 선택 여부가 다르다. 기존 전체 센서 M0 실험과 구분하고, 이번에는 센서 축소 영향만 먼저 비교한다.
 
 ```powershell
-python src/top20_time_validation.py --train data/splits/integrated/time_train.csv --validation data/splits/integrated/time_valid.csv --oof-dir logs/m3_m0_oof_compare --threshold 0.036539457738399506 --output-dir logs/m3_all_vs_top20_time --n-jobs 2 --compare-all
+python -m src.experiments.top20_time_validation --train data/splits/integrated/time_train.csv --validation data/splits/integrated/time_valid.csv --oof-dir logs/m3_m0_oof_compare --threshold 0.036539457738399506 --output-dir logs/m3_all_vs_top20_time --n-jobs 2 --compare-all
 ```
 
 두 모델을 각각 전체 Train에서 학습하며 OOF는 재생성하지 않는다. `sensor_compare.csv`, `sensor_compare.md`, `all_validation_predictions.csv`를 추가 저장하고 `execution.json`에 전체 모델의 실제 파라미터도 남긴다. 전체 센서 수는 Train 품질 필터 후의 개수다. 우선 비교 지표는 문턱과 무관한 AP·ROC-AUC다. 공통 문턱은 Top-20 OOF에서 선택한 진단값으로, 전체 모델의 운영 문턱을 결정한 것은 아니다. 운영 Recall·양성 비율을 공정하게 비교하려면 이후 전체 모델 자체의 Train OOF에서 정책 문턱을 별도로 선택해야 한다. 최종 Test는 사용하지 않고 실제 실행은 사용자가 수행한다.
 
 ### 선택된 센서의 Train·Validation 입력 분포 진단 준비
 
-`src/selected_sensor_drift.py`는 기존 시간 검증 실행 기록의 Train·Validation 경로와 `selected_features.csv`를 사용한다. 모델을 다시 학습하거나 센서를 재선택하지 않고, 기존 Step 3의 결측률·표준화 평균 차이·PSI 정의를 재사용한다. 생성 계약·평가 역할·설정·선택 센서 출처를 확인한다. 센서 값 변경을 탐지하는 해시 검사는 아니므로 기존 실행에 사용한 split 파일을 유지해야 한다.
+`src/diagnostics/selected_sensor_drift.py`는 기존 시간 검증 실행 기록의 Train·Validation 경로와 `selected_features.csv`를 사용한다. 모델을 다시 학습하거나 센서를 재선택하지 않고, 기존 Step 3의 결측률·표준화 평균 차이·PSI 정의를 재사용한다. 생성 계약·평가 역할·설정·선택 센서 출처를 확인한다. 센서 값 변경을 탐지하는 해시 검사는 아니므로 기존 실행에 사용한 split 파일을 유지해야 한다.
 
 ```powershell
-python src/selected_sensor_drift.py --run-dir logs/m3_all_vs_top20_time --output-dir logs/m3_selected_sensor_drift --figure-dir reports/figures/m3_selected_sensor_drift
+python -m src.diagnostics.selected_sensor_drift --run-dir logs/m3_all_vs_top20_time --output-dir logs/m3_selected_sensor_drift --figure-dir reports/figures/m3_selected_sensor_drift
 ```
 
 `selected_sensor_drift.csv`(선택 센서별 변화), `all_sensor_drift.csv`(전체 원본 센서의 EDA 요약), `selected_sensor_monthly.csv`(월·split별 평균·결측률·관측 수), `sensor_diagnostics.md`, `source.json`을 저장한다. 그림은 `reports/figures`에 저장한다. 원본 센서 전체 EDA에는 Train 품질 필터에서 제외된 센서도 포함되므로 전체 모델의 입력 목록과 혼동하지 않는다. 변화 우선순위는 공정 이상이나 통계적 유의성의 판정 기준이 아니다. 원인 후보 확인만 수행하고 threshold 조정·최종 Test 사용은 하지 않는다.
@@ -356,7 +356,7 @@ python src/selected_sensor_drift.py --run-dir logs/m3_all_vs_top20_time --output
 사용자가 공유한 진단 결과에서 PSI가 컸던 `sensor_539`, `sensor_267`, `sensor_59`, `sensor_40`과 결측률이 24.30%p 감소한 `sensor_562`를 우선 시각적으로 확인한다. 대상 센서는 실행 인자로 지정하며 코드에 SECOM 센서명을 고정하지 않는다.
 
 ```powershell
-python src/selected_sensor_drift.py --run-dir logs/m3_all_vs_top20_time --output-dir logs/m3_sensor_detail --figure-dir reports/figures/m3_sensor_detail --detail-features sensor_539 sensor_267 sensor_59 sensor_40 sensor_562
+python -m src.diagnostics.selected_sensor_drift --run-dir logs/m3_all_vs_top20_time --output-dir logs/m3_sensor_detail --figure-dir reports/figures/m3_sensor_detail --detail-features sensor_539 sensor_267 sensor_59 sensor_40 sensor_562
 ```
 
 기존 기본 진단에 더해 `sensor_detail.md`, `detail_value_summary.csv`, `detail_monthly.csv`, `reports/figures/m3_sensor_detail/sensor_detail.png`를 생성한다. 원본 관측값 누적분포·월별 평균·월별 결측률을 비교하고 월별 관측 수와 불량 비율도 남긴다. 같은 달이라도 Train/Validation을 별도로 표시한다. 결측을 대치하거나 센서를 제거하지 않으며 모델 학습·threshold 조정·최종 Test 사용은 없다.
@@ -366,7 +366,7 @@ python src/selected_sensor_drift.py --run-dir logs/m3_all_vs_top20_time --output
 시간 변화에 대응하는 후보로 전체 과거 구간과 최근 30일·60일 학습을 먼저 Train 내부에서 비교한다. M3 설정(깊이 2·정규화 5·트리 300개)은 유지하고 전체 센서와 S0 RF Top-K 경로를 함께 평가한다. 외부 Validation 결과에 맞춰 기간을 고르지 않는다.
 
 ```powershell
-python src/recent_window_compare.py --train data/splits/integrated/time_train.csv --output-dir logs/m3_recent_window_compare --windows 0 30 60 --n-splits 3 --n-jobs 2
+python -m src.experiments.recent_window_compare --train data/splits/integrated/time_train.csv --output-dir logs/m3_recent_window_compare --windows 0 30 60 --n-splits 3 --n-jobs 2
 ```
 
 0일은 전체 과거이며 양수는 각 학습 구간 마지막 시각에서 해당 일수 이내의 행이다. 같은 timestamp는 함께 유지한다. 3개 동일 시간 평가 구간 × 3개 학습 기간 × 2개 특징 경로로 최대 18회 학습한다. 내부 학습 구간에 두 클래스가 없으면 미평가 사유를 기록한다. 최근 기간에서 센서 품질 필터·대치·RF 선택도 다시 학습하며 전체 Train에서 선택한 센서를 고정하여 사용하지 않는다.
@@ -378,7 +378,7 @@ python src/recent_window_compare.py --train data/splits/integrated/time_train.cs
 평균만으로 원인을 추정하지 않고 같은 모델·시간 fold의 전체 과거 결과와 최근 기간 결과를 짝지어 AP 증감과 제외된 학습 표본·불량 수를 확인한다. `--analyze-only`는 기존 결과만 읽고 재학습하지 않는다.
 
 ```powershell
-python src/recent_window_compare.py --analyze-only --run-dir logs/m3_recent_window_compare --output-dir logs/m3_recent_window_diagnostics
+python -m src.experiments.recent_window_compare --analyze-only --run-dir logs/m3_recent_window_compare --output-dir logs/m3_recent_window_diagnostics
 ```
 
 `window_fold_diagnostics.csv`, `window_fold_diagnostics.md`, `source.json`을 생성한다. AP 차이는 최근−전체 과거이며 상대 변화는 기준 AP로 나눈 비율이다. `removed_train_fail`은 학습에서 제외된 불량 수로 평가 FN과 다르다. `same_training_period`는 기록된 학습 기간·행 수의 일치 여부다. 같은 미래 평가 구간의 결과만 대조하고 기준 누락·중복 결과는 오류 처리한다. 미평가·기준 AP=0은 상대 변화를 계산하지 않는다. 학습 불량 표본 감소와 성능 저하가 동시에 나타나도 인과관계를 확정하지 않는다.
@@ -388,7 +388,7 @@ python src/recent_window_compare.py --analyze-only --run-dir logs/m3_recent_wind
 `--sensor-overlap`은 기존 `selected_features.csv`에서 전체 과거와 최근 기간의 센서 교집합·추가·제외를 같은 시간 fold끼리 비교한다. 특히 학습 표본을 조금 제외해도 AP가 감소한 구간 1에서 센서 목록도 달라졌는지 확인한다.
 
 ```powershell
-python src/recent_window_compare.py --analyze-only --sensor-overlap --run-dir logs/m3_recent_window_compare --output-dir logs/m3_recent_sensor_overlap
+python -m src.experiments.recent_window_compare --analyze-only --sensor-overlap --run-dir logs/m3_recent_window_compare --output-dir logs/m3_recent_sensor_overlap
 ```
 
 기존 구간별 분석 파일에 더해 `sensor_overlap.csv`, `sensor_changes.csv`, `sensor_overlap.md`를 생성한다. `s0_m3_topk`는 RF 선택 목록의 변화이며 `m3_all`은 품질 필터 후 특징 목록의 변화다. 센서 수·중복·목록 누락을 검사하고 미평가 구간은 교집합 0으로 대신하지 않는다. 목록 교체와 AP 변화만으로 인과관계나 구현 오류를 확정하지 않는다. 모델 재학습·센서 제거·threshold 조정은 없으며 외부 Validation·최종 Test는 읽지 않는다.
@@ -398,7 +398,7 @@ python src/recent_window_compare.py --analyze-only --sensor-overlap --run-dir lo
 각 시간 fold의 전체 과거에서 선택한 S0 센서 20개를 고정한 `s0_m3_fixed_sensors`와 각 기간에서 선택기를 다시 학습하는 `s0_m3_topk`를 비교한다. 두 경로 모두 전체 과거(0일)와 최근 30일로 분류기를 학습하며 M3 설정·미래 평가 행은 유지한다. 전체 Train에서 고른 센서를 모든 fold에 사용하는 것은 금지한다.
 
 ```powershell
-python src/recent_window_compare.py --train data/splits/integrated/time_train.csv --output-dir logs/m3_fixed_sensor_control --windows 0 30 --n-splits 3 --n-jobs 2 --fixed-sensor-control
+python -m src.experiments.recent_window_compare --train data/splits/integrated/time_train.csv --output-dir logs/m3_fixed_sensor_control --windows 0 30 --n-splits 3 --n-jobs 2 --fixed-sensor-control
 ```
 
 최대 12회 학습한다. 고정 경로의 품질 제거·선택 목록은 각 fold의 전체 과거 fit 결과이며 median과 M3 분류기는 해당 기간에서 다시 fit한다. 최근 기간에서 센서를 재제거하지 않아 같은 센서 수·순서를 유지한다. 최근 기간의 특정 센서가 전부 결측이면 `keep_empty_features=True`의 0 대치를 사용하며 `empty_input_sensor_count`를 기록한다. `selection_train_samples`는 센서 선택에 사용한 표본 수, `train_samples`는 분류기 학습 표본 수다. 고정 경로는 오래된 과거 정보도 사용한 대조군이므로 순수한 최근 데이터 운영 전략으로 해석하지 않는다.
@@ -429,7 +429,7 @@ RF Top-20의 시간순 OOF는 이미 존재한다. 하지만 각 과거 학습 �
 5. Recall 70/80/90% 조건별 양성 비율 최소 후보, 양성 비율 20% 이하의 Recall 최대 후보, F1 최대 진단 후보를 **별도 시나리오**로 정리한다. 이는 비교용 자료이지 `config.json`의 정책을 자동 변경하는 작업이 아니다.
 6. 문턱 탐색에 사용한 OOF 성능은 최종 미사용 성능이 아니다. 모델·파라미터 선정에도 같은 자료를 사용했다면 선택 편향의 한계를 함께 적는다.
 
-**현재 CLI 연결의 빈 부분:** [step8_threshold_oof.py](src/step8_threshold_oof.py)와 [run_evaluation.py](src/run_evaluation.py)의 `--experiment` 선택지는 `lightgbm_all`, `xgboost`, `xgboost_scale_pos_weight`로 제한돼 있다. RF Top-20은 공통 Pipeline 생성이 가능하지만 이 실행 경로의 이름 허용·후속 모델 일치 검사를 연결해야 한다. 아직 지원되지 않는 명령을 실행 예시로 제공하지 않는다.
+**현재 CLI 연결의 빈 부분:** [step8_threshold_oof.py](src/experiments/step8_threshold_oof.py)와 [run_evaluation.py](src/evaluation/run_evaluation.py)의 `--experiment` 선택지는 `lightgbm_all`, `xgboost`, `xgboost_scale_pos_weight`로 제한돼 있다. RF Top-20은 공통 Pipeline 생성이 가능하지만 이 실행 경로의 이름 허용·후속 모델 일치 검사를 연결해야 한다. 아직 지원되지 않는 명령을 실행 예시로 제공하지 않는다.
 
 문서·노트북용 산출물은 OOF 확률표, threshold 비교표, 정책 상태표, Recall–양성 비율 그래프, FN/FP 비교 그래프로 준비한다. 소스·모델·선택 방식이 변경되면 새 실행 폴더에서 OOF부터 생성하고, 정책만 바뀔 때만 같은 성공 실행의 OOF를 재사용한다. 별도의 소스 해시 자동화 도입은 이 계획에 포함하지 않는다.
 
@@ -518,10 +518,10 @@ SECOM 센서가 익명 이름이라는 점도 제약이다. 동일한 이름이�
 
 ### 4.7 실제 Train의 추론 정합성 확인 명령어
 
-`src/check_sensor_inference.py`는 기존 단일 OOF 설정과 현재 정책 문턱을 확인한 뒤 전체 Train으로 S0·M3 모델을 한 번 학습한다. 같은 모델의 전체 입력 경로와 축소 입력 경로를 비교하며, 선택기 없는 전체 센서 모델과의 성능 비교가 아니다. 실행은 사용자가 수행한다.
+`src/verification/check_sensor_inference.py`는 기존 단일 OOF 설정과 현재 정책 문턱을 확인한 뒤 전체 Train으로 S0·M3 모델을 한 번 학습한다. 같은 모델의 전체 입력 경로와 축소 입력 경로를 비교하며, 선택기 없는 전체 센서 모델과의 성능 비교가 아니다. 실행은 사용자가 수행한다.
 
 ```powershell
-python src/check_sensor_inference.py --train data/splits/integrated/time_train.csv --oof-dir logs/m3_m0_oof_compare --threshold 0.036539457738399506 --output-dir logs/m3_sensor_inference_check --n-jobs 2
+python -m src.verification.check_sensor_inference --train data/splits/integrated/time_train.csv --oof-dir logs/m3_m0_oof_compare --threshold 0.036539457738399506 --output-dir logs/m3_sensor_inference_check --n-jobs 2
 ```
 
 - 정상 입력·컬럼 역순·일부 NaN·단일 행·배치 독립성·전체 센서 결측 거부를 확인한다.
@@ -550,7 +550,7 @@ python src/check_sensor_inference.py --train data/splits/integrated/time_train.c
 프로젝트 루트에서 실행한다. `-m src...` 모듈 실행을 사용해야 저장된 사용자 정의 클래스의 경로가 별도 프로세스에서도 유지된다.
 
 ```powershell
-python -m src.check_sensor_inference --train data/splits/integrated/time_train.csv --oof-dir logs/m3_m0_oof_compare --threshold 0.036539457738399506 --output-dir logs/m3_sensor_bundle_check --bundle-dir models/candidates/m3_sensor20 --n-jobs 2
+python -m src.verification.check_sensor_inference --train data/splits/integrated/time_train.csv --oof-dir logs/m3_m0_oof_compare --threshold 0.036539457738399506 --output-dir logs/m3_sensor_bundle_check --bundle-dir models/candidates/m3_sensor20 --n-jobs 2
 ```
 
 정합성 통과 후 `candidate.joblib`, `manifest.json`을 저장한다. 같은 학습 모델의 센서 순서·median·선택적 scaling·분류기·label·후보 threshold를 보존하며 현재 config를 읽어서 복원 상태를 변경하지 않는다. manifest에는 런타임 버전과 학습 출처·후보 상태를 기록한다.
@@ -558,7 +558,7 @@ python -m src.check_sensor_inference --train data/splits/integrated/time_train.c
 다음 명령은 **새 Python 프로세스**에서 복원한 예측과 저장 당시 예측을 비교한다. 학습은 하지 않는다.
 
 ```powershell
-python -m src.sensor_bundle --bundle-dir models/candidates/m3_sensor20 --trusted-local-bundle
+python -m src.inference.sensor_bundle --bundle-dir models/candidates/m3_sensor20 --trusted-local-bundle
 ```
 
 - `status: passed`와 확률·판정·label 일치 여부를 확인한다. 버전이 다르면 복원을 거부한다.
@@ -568,7 +568,7 @@ python -m src.sensor_bundle --bundle-dir models/candidates/m3_sensor20 --trusted
 
 ### 6.2 후보 예측 CLI (2026-10-07)
 
-`src/predict_cli.py`는 저장된 계약만 사용하며 재학습·설정 파일 로드·성능 평가를 하지 않는다. 신규 센서 CSV 또는 저장된 검증 행의 데모 복사본으로 실행할 수 있다. 입력 조건과 명령어는 [README](README.md#저장된-후보-모델로-센서-csv-예측)에 기록했다.
+`src/inference/predict_cli.py`는 저장된 계약만 사용하며 재학습·설정 파일 로드·성능 평가를 하지 않는다. 신규 센서 CSV 또는 저장된 검증 행의 데모 복사본으로 실행할 수 있다. 입력 조건과 명령어는 [README](README.md#저장된-후보-모델로-센서-csv-예측)에 기록했다.
 
 사용자 실행 결과로 실제 Train 1,096행에서 전체·축소 추론 확률 차이가 0이었고 판정·label이 일치했다. 후보 묶음의 별도 프로세스 복원에서도 검증 입력 33행의 확률 차이가 0이었다. 이는 구현 정합성 확인이며 시간순 성능 미달의 해결이나 최종 모델 승인이 아니다. CLI의 실제 SECOM 데모 실행은 아직 확인 전이다.
 

@@ -17,13 +17,13 @@ import pandas as pd
 try:
     from src.modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
     from src.threshold_policy import policy_candidates, select_policy_threshold
-    from src.step7_time_validation import compare_time_validation_from_files
-    from src.step8_threshold_oof import EXPERIMENT_NAME, run_threshold_oof_from_file
+    from src.experiments.step7_time_validation import compare_time_validation_from_files
+    from src.experiments.step8_threshold_oof import EXPERIMENT_NAME, run_threshold_oof_from_file
 except ModuleNotFoundError:
     from modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
     from threshold_policy import policy_candidates, select_policy_threshold
-    from step7_time_validation import compare_time_validation_from_files
-    from step8_threshold_oof import EXPERIMENT_NAME, run_threshold_oof_from_file
+    from src.experiments.step7_time_validation import compare_time_validation_from_files
+    from src.experiments.step8_threshold_oof import EXPERIMENT_NAME, run_threshold_oof_from_file
 
 
 CHANGES = ("preprocessing", "model", "data", "split", "threshold", "policy")

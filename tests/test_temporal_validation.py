@@ -13,7 +13,7 @@ import pandas as pd
 
 from src.modeling_config import MODELING_CONFIG
 from src.split_contract import SOURCE_ROW_ID, SPLIT_ROLE, PROTOCOL_ID
-from src.temporal_validation import temporal_folds, compare_temporal
+from src.experiments.temporal_validation import temporal_folds, compare_temporal
 
 
 class TemporalValidationTest(unittest.TestCase):

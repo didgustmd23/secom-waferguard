@@ -15,7 +15,7 @@ from pathlib import Path
 import pandas as pd
 
 from src.modeling_config import DatasetSpec, MODELING_CONFIG
-from src.step4_baseline import run_baseline, split_frame_to_xy, write_baseline_result
+from src.experiments.step4_baseline import run_baseline, split_frame_to_xy, write_baseline_result
 
 
 class BaselineTest(unittest.TestCase):

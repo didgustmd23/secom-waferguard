@@ -15,7 +15,7 @@ from sklearn.feature_selection import SelectFromModel
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 
-from src.check_sensor_inference import check_inference_paths, compare_prediction_paths
+from src.verification.check_sensor_inference import check_inference_paths, compare_prediction_paths
 from src.modeling_preprocessing import SensorQualityFilter
 from src.sensor_inference import build_sensor_inference
 

@@ -137,7 +137,7 @@ AP는 **선택한 문턱 하나의 검출률이 아니므로 AP 0.249를 Recall 
 | PCA 복원오차 | 정상 데이터로 배운 PCA에서 입력을 복원했을 때의 차이. 본 실험은 표준화된 값의 평균 제곱오차를 사용하며 값이 클수록 이상으로 해석한다. |
 | 이상 점수 | 정상 패턴에서 벗어난 정도를 나타내는 점수. 불량 확률이 아니므로 분류 확률의 threshold 0.50을 그대로 적용하지 않는다. |
 
-PSI·표준화 평균 차이·우선순위의 구체적 계산은 [드리프트 진단 코드](../src/step3_drift_check.py), 이상 점수 정의는 [이상 탐지 코드](../src/anomaly_compare.py)에 있다.
+PSI·표준화 평균 차이·우선순위의 구체적 계산은 [드리프트 진단 코드](../src/diagnostics/step3_drift_check.py), 이상 점수 정의는 [이상 탐지 코드](../src/experiments/anomaly_compare.py)에 있다.
 
 ## 2. 데이터와 품질 점검
 
@@ -531,10 +531,10 @@ Step 9 오류 요약은 TP 0·FP 3·FN 17·TN 215로 시간 검증 결과와 일
 
 ### 평가 방법과 재현 명령
 
-`src/temporal_validation.py`를 추가해 18~20절의 진단을 재생성 가능한 실험으로 정리했다. 동일한 Time Train 1,096행에서 timestamp 단위 `TimeSeriesSplit(n_splits=3)`로 아래 세 외부 구간을 만들었다. 정상·Fail 표본 수와 외부 경계는 기존 진단과 같으며, 외부 Time Validation과 Test는 읽지 않았다.
+`src/experiments/temporal_validation.py`를 추가해 18~20절의 진단을 재생성 가능한 실험으로 정리했다. 동일한 Time Train 1,096행에서 timestamp 단위 `TimeSeriesSplit(n_splits=3)`로 아래 세 외부 구간을 만들었다. 정상·Fail 표본 수와 외부 경계는 기존 진단과 같으며, 외부 Time Validation과 Test는 읽지 않았다.
 
 ```powershell
-python src/temporal_validation.py --train data/splits/integrated/time_train.csv --output-dir logs/temporal_validation_run --n-jobs 2
+python -m src.experiments.temporal_validation --train data/splits/integrated/time_train.csv --output-dir logs/temporal_validation_run --n-jobs 2
 ```
 
 출력 폴더는 비어 있어야 한다. 확정 실행 결과는 `logs/temporal_quality_filtered_20261006_final/`에 저장했다. LightGBM·LightGBM scale_pos_weight·Random Forest·L1 Logistic Regression balanced의 공통 Pipeline을 사용했고, 센서 제거·대치·scaling은 각 학습 구간에서만 fit했다. LightGBM 불량 가중치는 해당 학습 구간에서 계산했다.
@@ -616,10 +616,10 @@ AP 평균과 표준편차는 서로 다른 세 시간 구간의 기술 통계이
 
 ### 실행과 평가 조건
 
-`src/anomaly_compare.py`로 Isolation Forest와 PCA 복원오차를 비교했다. 입력은 기존 Time Train 1,096행이며 22절과 같은 세 외부 시간 구간(평가 279·273·272행, Fail 22·8·9행)을 사용했다. 외부 Validation과 최종 Test는 읽지 않았다.
+`src/experiments/anomaly_compare.py`로 Isolation Forest와 PCA 복원오차를 비교했다. 입력은 기존 Time Train 1,096행이며 22절과 같은 세 외부 시간 구간(평가 279·273·272행, Fail 22·8·9행)을 사용했다. 외부 Validation과 최종 Test는 읽지 않았다.
 
 ```powershell
-python src/anomaly_compare.py --train data/splits/integrated/time_train.csv --output-dir logs/anomaly_run --supervised-dir logs/temporal_quality_filtered_20261006_final --n-jobs 2
+python -m src.experiments.anomaly_compare --train data/splits/integrated/time_train.csv --output-dir logs/anomaly_run --supervised-dir logs/temporal_quality_filtered_20261006_final --n-jobs 2
 ```
 
 명령의 출력 폴더는 새 폴더여야 한다. 이번 실제 실행 폴더는 `logs/anomaly_20261006/`이다. 지도학습 비교 로그의 Train 생성 계약·학습 설정·외부 기간 및 표본 수·내부 시간 fold 수를 확인했다.
@@ -671,10 +671,10 @@ python src/anomaly_compare.py --train data/splits/integrated/time_train.csv --ou
 
 ### 비교 조건과 실행
 
-`src/feature_time_compare.py`로 전체 특징과 Top-50·Top-20을 22~23절과 같은 외부 시간 구간 3개에서 비교했다. 각 과거 학습 구간 내부의 시간순 OOF 2구간으로 threshold를 선택했다. 공통 시간 검증 코어를 재사용하므로 시간 경계·초기 제외·정책 선택 규칙은 동일하다. 외부 Validation·Test는 읽지 않았다.
+`src/experiments/feature_time_compare.py`로 전체 특징과 Top-50·Top-20을 22~23절과 같은 외부 시간 구간 3개에서 비교했다. 각 과거 학습 구간 내부의 시간순 OOF 2구간으로 threshold를 선택했다. 공통 시간 검증 코어를 재사용하므로 시간 경계·초기 제외·정책 선택 규칙은 동일하다. 외부 Validation·Test는 읽지 않았다.
 
 ```powershell
-python src/feature_time_compare.py --train data/splits/integrated/time_train.csv --output-dir logs/feature_time_run --n-jobs 2
+python -m src.experiments.feature_time_compare --train data/splits/integrated/time_train.csv --output-dir logs/feature_time_run --n-jobs 2
 ```
 
 실제 산출물은 `logs/feature_time_20261006/`에 저장했다. 기존 결과를 보존하려면 실행 시 새 출력 폴더를 지정한다.
@@ -808,10 +808,10 @@ XGBoost 가중치의 AP는 세 구간에서 0.1412 → 0.0312 → 0.3522로 크�
 아래는 이번 실행 조건이다. 시간순 실험을 재실행할 때는 비어 있는 새 출력 폴더를 지정한다.
 
 ```powershell
-python src/step5_model_compare.py --train data/splits/integrated/time_train.csv --output logs/xgboost_20261006/model_compare.csv
-python src/temporal_validation.py --train data/splits/integrated/time_train.csv --output-dir logs/xgboost_20261006/temporal --models lightgbm lightgbm_scale_pos_weight xgboost xgboost_scale_pos_weight --n-jobs 2
-python src/step8_threshold_oof.py --train data/splits/integrated/time_train.csv --experiment xgboost --oof-output logs/xgboost_20261006/xgboost/oof_predictions.csv --threshold-output logs/xgboost_20261006/xgboost/threshold_compare.csv --score-method single --n-jobs 2
-python src/step8_threshold_oof.py --train data/splits/integrated/time_train.csv --experiment xgboost_scale_pos_weight --oof-output logs/xgboost_20261006/xgboost_scale_pos_weight/oof_predictions.csv --threshold-output logs/xgboost_20261006/xgboost_scale_pos_weight/threshold_compare.csv --score-method single --n-jobs 2
+python -m src.experiments.step5_model_compare --train data/splits/integrated/time_train.csv --output logs/xgboost_20261006/model_compare.csv
+python -m src.experiments.temporal_validation --train data/splits/integrated/time_train.csv --output-dir logs/xgboost_20261006/temporal --models lightgbm lightgbm_scale_pos_weight xgboost xgboost_scale_pos_weight --n-jobs 2
+python -m src.experiments.step8_threshold_oof --train data/splits/integrated/time_train.csv --experiment xgboost --oof-output logs/xgboost_20261006/xgboost/oof_predictions.csv --threshold-output logs/xgboost_20261006/xgboost/threshold_compare.csv --score-method single --n-jobs 2
+python -m src.experiments.step8_threshold_oof --train data/splits/integrated/time_train.csv --experiment xgboost_scale_pos_weight --oof-output logs/xgboost_20261006/xgboost_scale_pos_weight/oof_predictions.csv --threshold-output logs/xgboost_20261006/xgboost_scale_pos_weight/threshold_compare.csv --score-method single --n-jobs 2
 ```
 
 현재 판단은 **XGBoost 기본 모델을 후속 비교 후보로 유지하되, 운영 가능 모델로 확정하지 않는다**이다. 가중치도 비교 기록으로 보존한다. 다음 필수 확장은 같은 Train·학습 fold 내부 전처리·시간순 검증을 사용하는 MLP 딥러닝 비교다. 정책 합의와 최종 모델·threshold 동결 전까지 Test를 사용하지 않는다.
@@ -866,7 +866,7 @@ RF 선택의 25개 fold에서 등장한 센서는 총 63종, XGBoost 선택은 2
 
 ### 산출물과 재현 명령
 
-`src/modeling_models.py`에 두 Top-K 선택 방식과 전체 XGBoost 실험을 추가했다. K는 기존 설정의 `top_k_feature_counts`를 사용하므로 다른 데이터에도 같은 코어를 사용할 수 있다. `src/step6_feature_compare.py`는 `--experiments`로 지정한 실험만 실행하며, 옵션을 생략하면 기존 PCA·L1·LightGBM 실험 목록을 유지한다.
+`src/modeling_models.py`에 두 Top-K 선택 방식과 전체 XGBoost 실험을 추가했다. K는 기존 설정의 `top_k_feature_counts`를 사용하므로 다른 데이터에도 같은 코어를 사용할 수 있다. `src/experiments/step6_feature_compare.py`는 `--experiments`로 지정한 실험만 실행하며, 옵션을 생략하면 기존 PCA·L1·LightGBM 실험 목록을 유지한다.
 
 결과는 `logs/xgboost_top20_20261006/`에 기존 로그와 분리해 저장했다.
 
@@ -880,7 +880,7 @@ RF 선택의 25개 fold에서 등장한 센서는 총 63종, XGBoost 선택은 2
 재실행 시 상세 결과 폴더는 비어 있는 새 폴더로 지정한다.
 
 ```powershell
-python src/step6_feature_compare.py --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_top_20 xgboost_rf_top_20 --output logs/xgboost_top20_run/feature_compare.csv --details-dir logs/xgboost_top20_run/details --n-jobs 2
+python -m src.experiments.step6_feature_compare --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_top_20 xgboost_rf_top_20 --output logs/xgboost_top20_run/feature_compare.csv --details-dir logs/xgboost_top20_run/details --n-jobs 2
 ```
 
 ## 27. XGBoost 전체 vs RF Top-20 시간순 검증 (2026-10-06)
@@ -939,14 +939,14 @@ RF의 외부 학습 3회에서 등장한 센서는 38종이며, 모두 선택된
 
 ### 실행 코드·산출물
 
-`src/feature_time_compare.py`에 `--experiments`를 추가해 공통 XGBoost Pipeline을 기존 시간순 코어에 연결했다. 옵션을 생략하면 기존 LightGBM 전체·Top-50/20 목록을 유지한다. XGBoost gain과 RF 중요도는 센서 기록에서도 구분한다. 전체 테스트 123개가 통과했고 실제 실행의 과거→미래 경계·fold별 20개 원본 센서·기존 전체 모델 결과 일치를 확인했다.
+`src/experiments/feature_time_compare.py`에 `--experiments`를 추가해 공통 XGBoost Pipeline을 기존 시간순 코어에 연결했다. 옵션을 생략하면 기존 LightGBM 전체·Top-50/20 목록을 유지한다. XGBoost gain과 RF 중요도는 센서 기록에서도 구분한다. 전체 테스트 123개가 통과했고 실제 실행의 과거→미래 경계·fold별 20개 원본 센서·기존 전체 모델 결과 일치를 확인했다.
 
 결과는 `logs/xgboost_top20_time_20261006/`에 저장했다. `summary.csv`, `fold_results.csv`, `folds.csv`에서 성능과 구간을, `oof_coverage.csv`, `threshold_compare.csv`, `policy_selection.csv`에서 문턱 출처와 미충족을 확인한다. `selected_features.csv`, `feature_frequency.csv`, `candidate_features.csv`에는 선택 센서·빈도·최종 미확정 후보가 있다. `quality_filter.csv`와 `candidate_quality_filter.csv`에는 실제 센서 제거 기록, `feature_run.json`에는 설정·모델 이름·환경 버전·split 계약을 보관했다.
 
 재실행할 때는 비어 있는 새 출력 폴더를 지정한다.
 
 ```powershell
-python src/feature_time_compare.py --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_rf_top_20 --output-dir logs/xgboost_top20_time_run --n-jobs 2
+python -m src.experiments.feature_time_compare --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_rf_top_20 --output-dir logs/xgboost_top20_time_run --n-jobs 2
 ```
 
 ## 28. S0 — 기존 RF 선택기 기준 실험 (2026-10-07)

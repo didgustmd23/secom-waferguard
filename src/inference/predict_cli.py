@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.sensor_bundle import load_sensor_bundle
+from src.inference.sensor_bundle import load_sensor_bundle
 
 
 def read_sensor_csv(path):

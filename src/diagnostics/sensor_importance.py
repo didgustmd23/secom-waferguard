@@ -21,7 +21,7 @@ from src.modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
 from src.modeling_models import fit_pipeline
 from src.modeling_preprocessing import quality_filter_record
 from src.split_contract import PROTOCOL_ID, validate_train_role
-from src.time_weight_compare import DEFAULT_PRESET, build_weight_candidates
+from src.experiments.time_weight_compare import DEFAULT_PRESET, build_weight_candidates
 
 
 def collect_importances(pipeline):

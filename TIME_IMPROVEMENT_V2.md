@@ -39,7 +39,7 @@ V1의 후속 시간 구간 Recall 11.11% 이후, 전체 센서에서 모델 복�
 프로젝트 루트에서 실행합니다. 출력 폴더가 이미 비어 있지 않으면 새 이름을 지정하세요.
 
 ```powershell
-python -m src.time_weight_compare --train data/splits/integrated/time_train.csv --output-dir logs/v2_time_weight_compare --n-jobs 2
+python -m src.experiments.time_weight_compare --train data/splits/integrated/time_train.csv --output-dir logs/v2_time_weight_compare --n-jobs 2
 ```
 
 - `comparison.md`, `summary.csv`: 구간별 AP 평균·편차와 탐지/양성 판정 부담 요약.
@@ -58,7 +58,7 @@ python -m src.time_weight_compare --train data/splits/integrated/time_train.csv 
 기존 V2 로그에는 학습 객체가 저장돼 있지 않습니다. 아래 명령은 지정한 후보 하나를 Time Train 전체에서 새로 학습하고 중요도를 추출합니다. 기본 후보는 `v2_m0_ratio`이며 최종 채택을 뜻하지 않습니다. 외부 Validation·Test는 읽지 않고 모델도 저장하지 않습니다.
 
 ```powershell
-python -m src.sensor_importance --train data/splits/integrated/time_train.csv --model v2_m0_ratio --output-dir logs/v2_sensor_importance --figure-dir reports/figures/v2_sensor_importance --n-jobs 2
+python -m src.diagnostics.sensor_importance --train data/splits/integrated/time_train.csv --model v2_m0_ratio --output-dir logs/v2_sensor_importance --figure-dir reports/figures/v2_sensor_importance --n-jobs 2
 ```
 
 - `feature_importance.csv`: 원본 센서 전체의 이름·학습/제거 상태·Train 결측률·정규화 gain 중요도·순위.

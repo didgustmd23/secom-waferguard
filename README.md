@@ -165,9 +165,9 @@ Step 6는 판정표를 출력하고 `--details-dir` 지정 시 `reduction_assess
 
 `src/modeling_metrics.py`는 Dataset Profile에서 전달받은 정상·불량 label을 기준으로 Recall, AP, Precision, F1, ROC-AUC와 confusion matrix를 공통 계산합니다.
 
-주요 함수에는 입력 데이터의 역할, 처리 결과, 평가 구간 분리 이유를 한국어 docstring으로 설명합니다. 특히 `src/modeling_preprocessing.py`와 `src/split_contract.py`는 공통 전처리·누수 방어 규칙을, `src/threshold_policy.py`는 threshold 정책 선택 기준을 설명합니다. `src/step5_model_compare.py`부터 `src/step9_error_analysis.py` 및 `src/temporal_validation.py`에는 각 실험의 데이터 사용 범위와 검증 목적을 기록해 코드만 읽어도 평가 흐름을 따라갈 수 있도록 했습니다.
+주요 함수에는 입력 데이터의 역할, 처리 결과, 평가 구간 분리 이유를 한국어 docstring으로 설명합니다. 특히 `src/modeling_preprocessing.py`와 `src/split_contract.py`는 공통 전처리·누수 방어 규칙을, `src/threshold_policy.py`는 threshold 정책 선택 기준을 설명합니다. `src/experiments/step5_model_compare.py`부터 `src/diagnostics/step9_error_analysis.py` 및 `src/experiments/temporal_validation.py`에는 각 실험의 데이터 사용 범위와 검증 목적을 기록해 코드만 읽어도 평가 흐름을 따라갈 수 있도록 했습니다.
 
-양현승의 모델 정의·Pipeline 생성·fold별 학습·양성 확률 추출은 `src/modeling_models.py`로 통합했습니다. 각 Step은 실험 실행과 결과 기록을 맡으며, 공통 데이터 분리는 `dataset_schema.py`, 시간 fold 생성은 `split_contract.py`, threshold 출처 검사는 `threshold_policy.py`를 사용합니다. 기존 Step 실행 명령과 CSV 열은 유지합니다. Step 8의 XGBoost에도 `--n-jobs`가 적용되며, Step 9는 `--experiment`로 사전 선택한 모델을 지정할 수 있습니다. 기본값은 기존 `lightgbm_all`입니다.
+양현승의 모델 정의·Pipeline 생성·fold별 학습·양성 확률 추출은 `src/modeling_models.py`로 통합했습니다. 각 Step은 실험 실행과 결과 기록을 맡으며, 공통 데이터 분리는 `dataset_schema.py`, 시간 fold 생성은 `split_contract.py`, threshold 출처 검사는 `threshold_policy.py`를 사용합니다. CSV 열은 유지하며, 실행 명령은 기능별 모듈 경로를 사용합니다. Step 8의 XGBoost에도 `--n-jobs`가 적용되며, Step 9는 `--experiment`로 사전 선택한 모델을 지정할 수 있습니다. 기본값은 기존 `lightgbm_all`입니다.
 
 `quality_rules.missing_ratio_threshold`와 `drop_zero_variance`는 공통 Pipeline의 `quality_filter` 단계에 적용됩니다. Validation에는 Train에서 결정한 센서 목록을 그대로 사용합니다. Baseline·모델 비교·특징 비교·시간 검증 결과 CSV의 `quality_filter_log`는 학습별 제거 개수·센서명·기준을 JSON 배열로 기록합니다. OOF는 점수 CSV 옆의 `<점수파일명>_quality_filter.csv`에 fold별 기록을 저장합니다. 품질 필터 도입 전의 성능·OOF threshold는 과거 결과이며, 필터 적용 후 재실행 결과는 `logs/quality_filtered_20261006/`에 저장했습니다.
 
@@ -263,8 +263,8 @@ UCI의 원본 데이터 CSV는 저장소에 포함하지 않습니다. [UCI SECO
 ### Day 1 데이터 준비
 
 ```powershell
-python src/step1_merge_data.py
-python src/step2_data_check.py
+python -m src.data_pipeline.step1_merge_data
+python -m src.data_pipeline.step2_data_check
 ```
 
 `step1_merge_data.py`는 Profile의 `ingestion` source 정의로 원본 파일을 병합하여 canonical 입력(`data/processed/secom_merged.csv`)을 생성합니다. 따라서 원본 경로나 읽기 옵션, label/timestamp 열 순서를 코드에 고정하지 않아 같은 수집 형식의 다른 데이터셋 Profile에도 처리 흐름을 적용할 수 있습니다.
@@ -276,7 +276,7 @@ python src/step2_data_check.py
 XGBoost의 전체 센서·gain 중요도 Top-20·RF 중요도 Top-20은 아래 명령으로 비교합니다. 최종 분류기는 모두 같은 XGBoost이며 전처리·선택은 학습 fold 내부에서만 fit합니다. `--experiments`를 생략하면 기존 PCA·L1·LightGBM 비교 목록을 실행합니다. `--details-dir`는 비어 있는 새 폴더를 지정하며 fold별 지표·선택 센서·설정을 저장합니다.
 
 ```powershell
-python src/step6_feature_compare.py --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_top_20 xgboost_rf_top_20 --output logs/xgboost_top20_run/feature_compare.csv --details-dir logs/xgboost_top20_run/details --n-jobs 2
+python -m src.experiments.step6_feature_compare --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_top_20 xgboost_rf_top_20 --output logs/xgboost_top20_run/feature_compare.csv --details-dir logs/xgboost_top20_run/details --n-jobs 2
 ```
 
 반복 CV AP는 전체 444개 **0.2490**, RF 선택 20개 **0.2459**, XGBoost 선택 20개 **0.2044**였습니다. 성능 동등성이나 최종 센서 집합은 확정하지 않았습니다. 현재는 최종 분류기에 20개가 들어가는 구조로, 원본 20개만 받는 추론 Pipeline은 아직 준비하지 않았습니다. 실제 결과는 `logs/xgboost_top20_20261006/`와 [보고서 26절](reports/report.md#26-xgboost-센서-선택-방법별-top-20-비교-2026-10-06)에 기록했습니다. 이번 비교에서 외부 Validation·Test 및 threshold 정책은 변경하지 않았습니다.
@@ -284,38 +284,38 @@ python src/step6_feature_compare.py --train data/splits/integrated/time_train.cs
 후속 시간순 검증은 같은 코어에서 전체 XGBoost와 RF Top-20만 지정해 실행할 수 있습니다. 과거 학습→다음 구간 평가 3회와 각 과거 구간의 내부 시간순 OOF 2회를 사용하며, 선택 센서·OOF threshold·정책 미충족을 별도로 기록합니다.
 
 ```powershell
-python src/feature_time_compare.py --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_rf_top_20 --output-dir logs/xgboost_top20_time_run --n-jobs 2
+python -m src.experiments.feature_time_compare --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_rf_top_20 --output-dir logs/xgboost_top20_time_run --n-jobs 2
 ```
 
 실제 시간 구간 평균 AP는 전체 **0.1553**, RF Top-20 **0.1177**이었으며 세 구간 모두 전체 모델이 높았습니다. 2026-10-07 결정한 기준으로 사후 해석하면 AP 상대 하락률 **약 24.25%**로 최대 허용 30% 안이지만 목표 20%에는 미달합니다. 이는 같은 성능 유지나 최종 선정 완료를 뜻하지 않습니다. 과거 OOF의 F1 최대 진단 문턱을 다음 구간에 적용하면 RF Top-20의 합산 Recall은 69.23%지만 양성 판정 비율도 59.47%였습니다. Recall 90%·양성 판정 비율 20% 정책은 두 모델·세 구간 모두 미충족입니다. 결과는 `logs/xgboost_top20_time_20261006/`와 [보고서 27절](reports/report.md#27-xgboost-전체-vs-rf-top-20-시간순-검증-2026-10-06)에 기록했으며 외부 Validation·Test는 사용하지 않았습니다.
 
-시간순 센서 축소 비교는 `src/feature_time_compare.py`로 실행합니다. 전체 센서·LightGBM 중요도 Top-50/20·RF 중요도 Top-50/20을 동일한 LightGBM 분류기로 비교합니다. 선택기는 각 학습 fold 내부에서만 fit하며 기존 시간 검증 코어의 외부 3구간·내부 시간순 OOF 2구간을 재사용합니다.
+시간순 센서 축소 비교는 `src/experiments/feature_time_compare.py`로 실행합니다. 전체 센서·LightGBM 중요도 Top-50/20·RF 중요도 Top-50/20을 동일한 LightGBM 분류기로 비교합니다. 선택기는 각 학습 fold 내부에서만 fit하며 기존 시간 검증 코어의 외부 3구간·내부 시간순 OOF 2구간을 재사용합니다.
 
 ```powershell
-python src/feature_time_compare.py --train data/splits/integrated/time_train.csv --output-dir logs/feature_time_run --n-jobs 2
+python -m src.experiments.feature_time_compare --train data/splits/integrated/time_train.csv --output-dir logs/feature_time_run --n-jobs 2
 ```
 
 `selected_features.csv`는 각 fit의 실제 특징 목록·선택 중요도·순위, `feature_frequency.csv`는 외부 fit 3회·내부 OOF fit 6회 각각의 선택 빈도입니다. `candidate_features.csv`는 전체 Time Train에서 만든 **최종 미확정 후보**이며 이를 이용해 과거 CV 특징을 전역 고정하지 않습니다. 범주형을 One-Hot으로 확장한 특징은 원본 센서 수와 구분합니다. 실제 결과는 `logs/feature_time_20261006/`, 보고서 24절, 분석 노트북 7절에서 확인할 수 있습니다. 외부 Validation·Test는 읽지 않고 기존 실행기 대상도 자동 변경하지 않습니다.
 
-정상만 학습하는 이상 탐지는 `src/anomaly_compare.py`로 실행합니다. 센서 품질 필터·대치·표준화와 Isolation Forest 또는 PCA90을 각 학습 구간의 정상 데이터에만 fit합니다. Isolation Forest는 `-score_samples`, PCA는 표준화된 입력의 평균 제곱 복원오차를 사용해 클수록 이상으로 통일합니다. 두 점수는 확률이 아니므로 기본 확률 threshold 0.5를 적용하지 않습니다. Isolation Forest의 점수 방향은 [공식 문서](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.IsolationForest.html)를 따릅니다.
+정상만 학습하는 이상 탐지는 `src/experiments/anomaly_compare.py`로 실행합니다. 센서 품질 필터·대치·표준화와 Isolation Forest 또는 PCA90을 각 학습 구간의 정상 데이터에만 fit합니다. Isolation Forest는 `-score_samples`, PCA는 표준화된 입력의 평균 제곱 복원오차를 사용해 클수록 이상으로 통일합니다. 두 점수는 확률이 아니므로 기본 확률 threshold 0.5를 적용하지 않습니다. Isolation Forest의 점수 방향은 [공식 문서](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.IsolationForest.html)를 따릅니다.
 
 ```powershell
-python src/anomaly_compare.py --train data/splits/integrated/time_train.csv --output-dir logs/anomaly_run --supervised-dir logs/temporal_quality_filtered_20261006_final --n-jobs 2
+python -m src.experiments.anomaly_compare --train data/splits/integrated/time_train.csv --output-dir logs/anomaly_run --supervised-dir logs/temporal_quality_filtered_20261006_final --n-jobs 2
 ```
 
 출력 폴더는 새 폴더여야 합니다. 기존과 같은 외부 시간 구간 3개·내부 시간순 OOF 구간 2개를 사용하며 초기 미예측 행은 제외합니다. `fold_results.csv`는 OOF F1 최대 진단 후보의 다음 구간 성능, `policy_selection.csv`는 현재 설정 정책의 선택·미충족 결과입니다. 정책 미충족이어도 AP와 F1 진단 비교는 저장하지만 임의 후보를 정책 통과로 취급하지 않습니다. `anomaly_compare.csv`에는 생성 계약·학습 설정·시간 경계가 맞는 기존 지도학습 진단을 연결합니다. `quality_filter.csv`에는 모든 fit의 정상 표본 ID·제거 개수·PCA 성분 수가 기록됩니다. 점수 규모가 학습 구간에 따라 달라질 수 있어 OOF 문턱의 미래 전이는 별도 검증이 필요합니다. 최종 Test와 외부 Validation은 읽지 않습니다.
 
-변경 후 OOF와 시간 검증을 연결할 때는 `src/run_evaluation.py`를 사용합니다. `--change preprocessing`, `model`, `data`, `split`은 Step 8 OOF·threshold 비교표를 재생성한 뒤 Step 7 시간 검증을 실행합니다. `--change threshold`는 이 실행기로 성공한 같은 폴더의 비교표를 재사용하며 `--threshold`가 필수입니다. OOF 생성이 실패하면 후속 평가를 중단하고, 실패한 실행 폴더의 과거 비교표 재사용도 거부합니다. 상태와 설정은 `execution.json`에 기록합니다.
+변경 후 OOF와 시간 검증을 연결할 때는 `src/evaluation/run_evaluation.py`를 사용합니다. `--change preprocessing`, `model`, `data`, `split`은 Step 8 OOF·threshold 비교표를 재생성한 뒤 Step 7 시간 검증을 실행합니다. `--change threshold`는 이 실행기로 성공한 같은 폴더의 비교표를 재사용하며 `--threshold`가 필수입니다. OOF 생성이 실패하면 후속 평가를 중단하고, 실패한 실행 폴더의 과거 비교표 재사용도 거부합니다. 상태와 설정은 `execution.json`에 기록합니다.
 
 ```powershell
 # 전처리 변경: OOF 생성 → 후보 threshold 선택 → 시간 검증
-python src/run_evaluation.py --change preprocessing --train data/splits/integrated/time_train.csv --validation data/splits/integrated/time_valid.csv --run-dir logs/evaluation_run --n-jobs 2
+python -m src.evaluation.run_evaluation --change preprocessing --train data/splits/integrated/time_train.csv --validation data/splits/integrated/time_valid.csv --run-dir logs/evaluation_run --n-jobs 2
 
 # threshold 변경: 같은 실행 폴더의 비교표 후보값을 지정
-python src/run_evaluation.py --change threshold --threshold <비교표의_반올림하지_않은_값> --train data/splits/integrated/time_train.csv --validation data/splits/integrated/time_valid.csv --run-dir logs/evaluation_run --n-jobs 2
+python -m src.evaluation.run_evaluation --change threshold --threshold <비교표의_반올림하지_않은_값> --train data/splits/integrated/time_train.csv --validation data/splits/integrated/time_valid.csv --run-dir logs/evaluation_run --n-jobs 2
 
 # config.json의 threshold_policy만 변경: 기존 OOF로 정책 후보 재선택
-python src/run_evaluation.py --change policy --train data/splits/integrated/time_train.csv --validation data/splits/integrated/time_valid.csv --run-dir logs/evaluation_run --n-jobs 2
+python -m src.evaluation.run_evaluation --change policy --train data/splits/integrated/time_train.csv --validation data/splits/integrated/time_valid.csv --run-dir logs/evaluation_run --n-jobs 2
 ```
 
 threshold 생략 시 `config.json`의 `threshold_policy`로 OOF 후보를 선택합니다. 현재 사용자 결정의 프로젝트 임시 정책은 `min_recall: 0.8`(최소 Recall 80%), `max_reinspection_ratio: 0.4`(양성 판정 비율 상한 40%)입니다. 비율은 `(TP + FP) / 전체 표본 수`이며 실제 재검사 수행량이나 현장 표준을 뜻하지 않습니다. `selection_rule: "min_reinspection"`은 조건을 충족하는 후보 중 재검사 비율 최소 → Recall 최대 → threshold 최대 순으로 선택합니다. `on_infeasible: "report_only"`는 후보가 없으면 F1 최대값으로 대체하지 않고 미충족을 기록하며 시간 검증을 생략합니다. 후보별 판단은 `policy_candidates.csv`, 실행 여부는 `execution.json`에 기록합니다. 생략 시 과거 `time_validation.csv`가 남아 있어도 이번 실행 결과로 해석하지 않습니다. 과거 90%·20% 로그는 당시 조건으로 보존하며 새 정책 적용 결과가 아닙니다. M3 RF Top-20의 후속 평가 연결은 [개선 계획](SECOM_TOP20_PLAN.md)에 별도로 기록합니다.
@@ -328,33 +328,33 @@ threshold 생략 시 `config.json`의 `threshold_policy`로 OOF 후보를 선택
 
 ```powershell
 # 시간 holdout을 먼저 분리 (70/15/15는 목표 비율이며 동일 timestamp·그룹은 분리하지 않음)
-python src/step3_split.py
+python -m src.data_pipeline.step3_split
 
 # Time Train/Validation baseline
-python src/step4_baseline.py --train data/splits/integrated/time_train.csv --validation data/splits/integrated/time_valid.csv --split-strategy time --output logs/integrated/baseline.csv
+python -m src.experiments.step4_baseline --train data/splits/integrated/time_train.csv --validation data/splits/integrated/time_valid.csv --split-strategy time --output logs/integrated/baseline.csv
 
 # 동일한 Time Train 내부 반복 CV 후보 모델 비교
-python src/step5_model_compare.py --train data/splits/integrated/time_train.csv --output logs/integrated/model_compare.csv
+python -m src.experiments.step5_model_compare --train data/splits/integrated/time_train.csv --output logs/integrated/model_compare.csv
 
 # 위 후보 목록에는 XGBoost 일반·scale_pos_weight 실험도 포함됨
 
 # PCA·L1·LightGBM Top-K 특징 선택 비교
-python src/step6_feature_compare.py --train data/splits/integrated/time_train.csv --output logs/integrated/feature_compare.csv --n-jobs -1
+python -m src.experiments.step6_feature_compare --train data/splits/integrated/time_train.csv --output logs/integrated/feature_compare.csv --n-jobs -1
 
 # Train 내부 세 시간 구간: 기본 threshold·계층 OOF·시간순 OOF 전이 비교
-python src/temporal_validation.py --train data/splits/integrated/time_train.csv --output-dir logs/temporal_validation_run --n-jobs 2
+python -m src.experiments.temporal_validation --train data/splits/integrated/time_train.csv --output-dir logs/temporal_validation_run --n-jobs 2
 
 # LightGBM 전체 특성의 OOF 확률·threshold 비교
-python src/step8_threshold_oof.py --train data/splits/integrated/time_train.csv --oof-output logs/integrated/oof_predictions.csv --threshold-output logs/integrated/threshold_compare.csv --n-jobs -1
+python -m src.experiments.step8_threshold_oof --train data/splits/integrated/time_train.csv --oof-output logs/integrated/oof_predictions.csv --threshold-output logs/integrated/threshold_compare.csv --n-jobs -1
 
 # CV 결과에서 선택한 XGBoost 후보의 OOF threshold 비교
-python src/step8_threshold_oof.py --train data/splits/integrated/time_train.csv --experiment xgboost --oof-output logs/integrated/xgboost_oof_predictions.csv --threshold-output logs/integrated/xgboost_threshold_compare.csv --n-jobs -1
+python -m src.experiments.step8_threshold_oof --train data/splits/integrated/time_train.csv --experiment xgboost --oof-output logs/integrated/xgboost_oof_predictions.csv --threshold-output logs/integrated/xgboost_threshold_compare.csv --n-jobs -1
 
 # 시간 검증: 생략 시 후보 비교 기본 threshold 사용. 새 Train에서 정한 값만 --threshold로 주입
-python src/step7_time_validation.py --train data/splits/integrated/time_train.csv --validation data/splits/integrated/time_valid.csv --experiments lightgbm_all --output logs/integrated/time_validation.csv --n-jobs -1
+python -m src.experiments.step7_time_validation --train data/splits/integrated/time_train.csv --validation data/splits/integrated/time_valid.csv --experiments lightgbm_all --output logs/integrated/time_validation.csv --n-jobs -1
 
 # 후보 비교에서 XGBoost를 선택한 경우 같은 시간 분할에서 비교
-python src/step7_time_validation.py --train data/splits/integrated/time_train.csv --validation data/splits/integrated/time_valid.csv --experiments xgboost --output logs/integrated/xgboost_time_validation.csv --n-jobs -1
+python -m src.experiments.step7_time_validation --train data/splits/integrated/time_train.csv --validation data/splits/integrated/time_valid.csv --experiments xgboost --output logs/integrated/xgboost_time_validation.csv --n-jobs -1
 ```
 
 `--n-jobs -1`은 해당 옵션을 제공하는 Step 6~9 및 시간순 실험에서 트리 모델 내부 병렬 처리를 사용한다. Step 5는 모델 내부 병렬 수 1로 실행한다. 환경 자원이 제한된 경우 기본값인 `1`을 사용한다. XGBoost는 `requirements.txt`에 추가했으므로 기존 환경에서는 `pip install -r requirements.txt`로 의존성을 설치한 뒤 실행한다. XGBoost의 반복 CV·시간순 내부 검증·단일 OOF 결과는 [보고서 25절](reports/report.md#25-xgboost-추가-비교-2026-10-06)과 `logs/xgboost_20261006/`에 기록했다. 기본 모델 CV AP는 0.2490으로 LightGBM 0.2424보다 소폭 높았지만, Recall 91.03%에서 재검사율은 63.96%로 20% 상한을 넘었다. 최종 모델·threshold는 미확정이며 이번 실험에서 외부 Validation·Test는 사용하지 않았다.
@@ -377,12 +377,12 @@ Step 3을 재실행할 때는 새로운 `--output-dir`과 `--log-dir`을 지정�
 
 후속 평가의 사용 이력 점검·사용자 동결 승인은 [최종 평가 점검](FINAL_EVALUATION_REVIEW.md)에 기록했습니다. 사용자가 동결 모델 평가를 완료했지만 과거 완전한 미사용 여부는 보증하지 못하며 현장 배포 승인도 아닙니다.
 
-`src/predict_cli.py`는 저장된 센서 목록·학습 median·분류기·후보 threshold로만 예측합니다. 설정 변경·재학습·성능 평가는 하지 않습니다. S0·M3 Top-20은 연구·데모용 후보이며 시간순 검증 목표 미달이라는 한계가 남아 있습니다.
+`src/inference/predict_cli.py`는 저장된 센서 목록·학습 median·분류기·후보 threshold로만 예측합니다. 설정 변경·재학습·성능 평가는 하지 않습니다. S0·M3 Top-20은 연구·데모용 후보이며 시간순 검증 목표 미달이라는 한계가 남아 있습니다.
 
 프로젝트 루트에서 실행합니다. joblib은 코드 실행 위험이 있으므로 직접 생성한 신뢰한 파일에만 신뢰 옵션을 사용하세요.
 
 ```powershell
-python -m src.predict_cli --bundle-dir models/candidates/m3_sensor20 --input data/processed/new_sensor20.csv --output logs/new_sensor20_predictions.csv --trusted-local-bundle
+python -m src.inference.predict_cli --bundle-dir models/candidates/m3_sensor20 --input data/processed/new_sensor20.csv --output logs/new_sensor20_predictions.csv --trusted-local-bundle
 ```
 
 - UTF-8 CSV 첫 행은 `manifest.json`의 `sensors`에 기록된 센서명입니다. 해당 센서만 포함하며 순서는 달라도 됩니다.
@@ -396,8 +396,8 @@ python -m src.predict_cli --bundle-dir models/candidates/m3_sensor20 --input dat
 신규 입력이 없다면 저장된 검증 행으로 CLI 동작만 확인할 수 있습니다.
 
 ```powershell
-python -m src.predict_cli --bundle-dir models/candidates/m3_sensor20 --export-demo-input data/processed/sensor20_demo.csv --trusted-local-bundle
-python -m src.predict_cli --bundle-dir models/candidates/m3_sensor20 --input data/processed/sensor20_demo.csv --output logs/sensor20_demo_predictions.csv --trusted-local-bundle
+python -m src.inference.predict_cli --bundle-dir models/candidates/m3_sensor20 --export-demo-input data/processed/sensor20_demo.csv --trusted-local-bundle
+python -m src.inference.predict_cli --bundle-dir models/candidates/m3_sensor20 --input data/processed/sensor20_demo.csv --output logs/sensor20_demo_predictions.csv --trusted-local-bundle
 ```
 
 데모는 **Train 유래 검증 센서 값 최대 33행**의 복사본입니다. 신규 성능 평가·미사용 Test로 보고하지 마세요. `/models/candidates/`와 CSV 파일은 Git에서 제외하며 버전이 다른 환경에서는 묶음 복원을 거부합니다.
@@ -427,31 +427,36 @@ secom-waferguard/
 │   ├── modeling_models.py   # 모델·실험 Pipeline 정의, 공통 fold 학습·양성 확률
 │   ├── modeling_preprocessing.py # 모델 간 공통 수치형·범주형 전처리
 │   ├── split_contract.py    # split 역할·중복·시간 경계·그룹 CV 검사
-│   ├── step1_merge_data.py  # Profile ingestion 기반 원본 병합
-│   ├── step2_data_check.py  # EDA용 품질 로그 생성
-│   ├── step3_split.py       # 팀원 코드 기반 Random 탐색 / Time holdout 생성·검증
-│   ├── step3_drift_check.py # Time Train/Validation 분포 변화 진단
-│   ├── step4_baseline.py    # Train/Validation baseline 평가
-│   ├── step5_model_compare.py # 후보 모델 반복 CV 비교
-│   ├── step6_feature_compare.py # PCA·L1·Top-K 특징 선택 비교
-│   ├── step7_time_validation.py # 사전 선택 후보의 시간 구간 검증
-│   ├── step8_threshold_oof.py # OOF threshold 비교
-│   ├── top20_oof_compare.py # S0 + M3·M0 단일 OOF·Recall별 선별 부담 비교
-│   ├── top20_time_validation.py # 기존 S0·M3 OOF 문턱을 고정한 시간순 Validation
-│   ├── score_diagnostics.py # 정상·불량별 확률 분포와 선택 센서 교집합 진단
-│   ├── selected_sensor_drift.py # 저장된 선택 센서의 결측률·값 분포·월별 평균 진단
-│   ├── sensor_detail.py # 지정 센서의 원본 누적분포·월별 상세 그래프와 요약
-│   ├── recent_window_compare.py # Train 내부 전체 과거·최근 기간 학습의 시간순 비교
 │   ├── sensor_inference.py # 선택 수치형 센서만 사용하는 예측 전용 코어
-│   ├── check_sensor_inference.py # 전체·축소 입력 정합성 확인·후보 저장
-│   ├── sensor_bundle.py # 후보 묶음 저장·별도 프로세스 복원 확인
-│   ├── predict_cli.py # 고정 센서 CSV 예측·데모 입력 내보내기
-│   ├── evaluate_frozen_model.py # 동결 모델의 후속 시간 구간 1회 평가 (재학습 없음)
-│   ├── run_evaluation.py     # 변경 범위별 OOF·시간 검증 실행 관리
-│   ├── temporal_validation.py # Train 내부 시간순 검증·OOF 전이 비교
-│   ├── anomaly_compare.py    # 정상 전용 Isolation Forest·PCA 복원오차 시간순 비교
-│   ├── feature_time_compare.py # 전체·Top-50/20 시간순 비교·선택 센서 및 빈도
-│   └── step9_error_analysis.py # Time Validation FN/FP 분석
+│   ├── threshold_policy.py # OOF 정책 후보·문턱 선택
+│   ├── feature_reduction.py # fold 내부 특징 축소 구성
+│   ├── stable_rf_selector.py # RF 기반 센서 선택기
+│   ├── data_pipeline/      # 원본 병합·품질 점검·분할
+│   │   ├── step1_merge_data.py
+│   │   ├── step2_data_check.py
+│   │   └── step3_split.py
+│   ├── experiments/        # Baseline·모델·특징·OOF·시간순 비교
+│   │   ├── step4_baseline.py ~ step8_threshold_oof.py
+│   │   ├── top20_oof_compare.py / top20_time_validation.py
+│   │   ├── temporal_validation.py / time_weight_compare.py
+│   │   └── recent_window_compare.py / feature_time_compare.py / anomaly_compare.py
+│   ├── inference/          # 모델 묶음 저장·복원·CSV 예측
+│   │   ├── sensor_bundle.py
+│   │   └── predict_cli.py
+│   ├── evaluation/         # 동결 모델 평가·실행 범위 관리
+│   │   ├── evaluate_frozen_model.py
+│   │   └── run_evaluation.py
+│   ├── diagnostics/         # EDA·분포·중요도·오류 분석·보고서용 시각화
+│   │   ├── sensor_importance.py # 전체 Train gain 중요도 진단
+│   │   ├── sensor_stability.py # 시간순 Fold별 gain 순위·Top-K 안정성
+│   │   ├── step3_drift_check.py # Train/Validation 입력 분포 변화
+│   │   ├── selected_sensor_drift.py # 선택 센서 분포 진단
+│   │   ├── sensor_detail.py # 지정 센서 상세 그래프
+│   │   ├── score_diagnostics.py # 예측 점수·센서 교집합 진단
+│   │   ├── step9_error_analysis.py # FN/FP 오류 분석
+│   │   └── step*_analysis.py 등 # 기존 탐색·보고서용 분석 스크립트
+│   └── verification/        # 학습·저장·추론 경로의 구현 정합성 확인
+│       └── check_sensor_inference.py # 전체·축소 입력 비교·후보 저장
 ├── tests/                   # 설정·schema·평가·실험 함수 자동 테스트
 ├── logs/                    # 데이터·실험 결과 CSV
 ├── models/                  # model.joblib, model_card.json
@@ -460,6 +465,8 @@ secom-waferguard/
     ├── analysis.ipynb       # 기존 로그를 표·그래프로 확인하는 분석 전용 노트북
     └── figures/             # README, 보고서, 발표에 사용하는 시각화 결과
 ```
+
+폴더 분류 기준과 변경된 실행 방법은 [소스 역할 안내](src/README.md)를 참고하세요. 하위 폴더의 실행기는 프로젝트 루트에서 `python -m src.<기능 폴더>.<모듈명>`으로 실행합니다. 기존 출력 데이터 경로와 모델 설정은 변경하지 않았습니다.
 
 ## 산출물
 

@@ -13,7 +13,7 @@ import pandas as pd
 
 from src.modeling_config import MODELING_CONFIG
 from src.split_contract import SOURCE_ROW_ID, PROTOCOL_ID, validate_split_pair
-from src.step3_split import (
+from src.data_pipeline.step3_split import (
     prepare_split_frames, write_split_files, make_time_split,
     check_timestamp_overlap, check_duplicate_leakage,
 )

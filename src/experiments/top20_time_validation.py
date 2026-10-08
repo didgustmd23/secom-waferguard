@@ -19,19 +19,19 @@ try:
     from src.modeling_models import build_pipeline
     from src.dataset_schema import split_frame_to_xy
     from src.split_contract import SOURCE_ROW_ID, PROTOCOL_ID, validate_train_role
-    from src.step8_threshold_oof import compare_thresholds
-    from src.step7_time_validation import compare_time_validation
+    from src.experiments.step8_threshold_oof import compare_thresholds
+    from src.experiments.step7_time_validation import compare_time_validation
     from src.threshold_policy import select_policy_threshold, validate_threshold_report
-    from src.score_diagnostics import write_score_diagnostics
+    from src.diagnostics.score_diagnostics import write_score_diagnostics
 except ModuleNotFoundError:
     from modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
     from modeling_models import build_pipeline
     from dataset_schema import split_frame_to_xy
     from split_contract import SOURCE_ROW_ID, PROTOCOL_ID, validate_train_role
-    from step8_threshold_oof import compare_thresholds
-    from step7_time_validation import compare_time_validation
+    from src.experiments.step8_threshold_oof import compare_thresholds
+    from src.experiments.step7_time_validation import compare_time_validation
     from threshold_policy import select_policy_threshold, validate_threshold_report
-    from score_diagnostics import write_score_diagnostics
+    from diagnostics.score_diagnostics import write_score_diagnostics
 
 
 # ==========================================

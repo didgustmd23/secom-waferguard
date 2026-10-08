@@ -17,7 +17,7 @@ from sklearn.pipeline import Pipeline
 from src.modeling_config import MODELING_CONFIG
 from src.modeling_preprocessing import preprocessing_steps, quality_filter_record, quality_filter_json
 import json
-from src.step2_data_check import build_quality_log
+from src.data_pipeline.step2_data_check import build_quality_log
 
 
 class SensorQualityFilterTest(unittest.TestCase):

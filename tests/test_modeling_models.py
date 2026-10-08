@@ -17,8 +17,8 @@ from src.modeling_config import MODELING_CONFIG
 from src.modeling_models import (
     XGBoostClassifierAdapter, build_pipeline, fit_pipeline, positive_scores,
 )
-from src.step8_threshold_oof import generate_oof_scores
-from src.step9_error_analysis import analyze_time_validation_errors
+from src.experiments.step8_threshold_oof import generate_oof_scores
+from src.diagnostics.step9_error_analysis import analyze_time_validation_errors
 
 
 class ModelingModelsTest(unittest.TestCase):
@@ -114,7 +114,7 @@ class ModelingModelsTest(unittest.TestCase):
             model = fit_pipeline(*args, **kwargs)
             fitted_models.append(model)
             return model
-        with patch("src.step8_threshold_oof.fit_pipeline", side_effect=record_fit):
+        with patch("src.experiments.step8_threshold_oof.fit_pipeline", side_effect=record_fit):
             oof, _ = generate_oof_scores(
                 self._frame(), self.config, experiment_name="xgboost", n_jobs=2,
             )
@@ -128,7 +128,7 @@ class ModelingModelsTest(unittest.TestCase):
             "sensor_a": [0.11, 0.87], "sensor_b": [0.88, 0.14],
             "target": ["pass", "fail"],
         })
-        with patch("src.step9_error_analysis.fit_pipeline", wraps=fit_pipeline) as fit:
+        with patch("src.diagnostics.step9_error_analysis.fit_pipeline", wraps=fit_pipeline) as fit:
             cases, summary, features = analyze_time_validation_errors(
                 self._frame(), validation, self.config,
                 threshold=0.5, experiment_name="xgboost", n_jobs=2,

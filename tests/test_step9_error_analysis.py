@@ -10,7 +10,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from src.step9_error_analysis import assign_error_groups, compare_error_features, summarize_error_groups
+from src.diagnostics.step9_error_analysis import assign_error_groups, compare_error_features, summarize_error_groups
 
 
 class ErrorAnalysisTest(unittest.TestCase):

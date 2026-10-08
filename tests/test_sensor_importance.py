@@ -16,9 +16,9 @@ import pandas as pd
 
 from src.modeling_config import MODELING_CONFIG
 from src.modeling_preprocessing import SensorQualityFilter
-from src.sensor_importance import collect_importances, draw_importances, fit_importance_candidate
+from src.diagnostics.sensor_importance import collect_importances, draw_importances, fit_importance_candidate
 from src.split_contract import PROTOCOL_ID, SOURCE_ROW_ID, SPLIT_ROLE
-from src.time_weight_compare import DEFAULT_PRESET
+from src.experiments.time_weight_compare import DEFAULT_PRESET
 
 
 class SensorImportanceTest(unittest.TestCase):

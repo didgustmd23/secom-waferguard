@@ -14,7 +14,7 @@ from typing import Any
 
 import pandas as pd
 
-# Script 직접 실행과 `src.step2_data_check` 모듈 import를 모두 지원한다.
+# Script 직접 실행과 `src.data_pipeline.step2_data_check` 모듈 import를 모두 지원한다.
 try:
     from src.dataset_schema import validate_dataset_frame
     from src.modeling_config import DEFAULT_CONFIG_PATH, DatasetSpec, load_modeling_config
