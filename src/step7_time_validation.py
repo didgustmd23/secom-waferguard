@@ -20,7 +20,7 @@ try:
     from src.dataset_schema import split_frame_to_xy
     from src.modeling_models import build_pipeline, fit_pipeline, positive_scores
     from src.modeling_preprocessing import fitted_feature_count, quality_filter_record, quality_filter_json
-    from src.split_contract import PROTOCOL_ID, validate_split_pair
+    from src.split_contract import PROTOCOL_ID, SOURCE_ROW_ID, validate_split_pair
     from src.threshold_policy import validate_threshold_report
 except ModuleNotFoundError:
     from modeling_config import DEFAULT_CONFIG_PATH, ModelingConfig, load_modeling_config
@@ -28,7 +28,7 @@ except ModuleNotFoundError:
     from dataset_schema import split_frame_to_xy
     from modeling_models import build_pipeline, fit_pipeline, positive_scores
     from modeling_preprocessing import fitted_feature_count, quality_filter_record, quality_filter_json
-    from split_contract import PROTOCOL_ID, validate_split_pair
+    from split_contract import PROTOCOL_ID, SOURCE_ROW_ID, validate_split_pair
     from threshold_policy import validate_threshold_report
 
 
@@ -49,7 +49,7 @@ AVAILABLE_EXPERIMENTS = PRESELECTED_EXPERIMENTS + (
 # Time Train/Validation으로 후보 모델을 학습·평가
 # - Train feature 구성을 기준으로 Validation feature 구성을 엄격히 확인한다.
 # - 각 Pipeline의 imputation, scaling, feature selection은 Time Train에서만 fit한다.
-# - 비교 threshold는 config.json의 고정값을 사용한다.
+# - 비교 기본 threshold 또는 사전에 선택한 OOF threshold를 사용한다.
 # ==========================================
 def compare_time_validation(
     train_frame: pd.DataFrame,
@@ -60,6 +60,7 @@ def compare_time_validation(
     threshold: float | None = None,
     n_jobs: int = 1,
     threshold_report: pd.DataFrame | None = None,
+    pipeline_templates: dict | None = None,
 ) -> pd.DataFrame:
     """사전 선택된 실험을 시간 순서 Validation 구간에서 평가한다.
 
@@ -96,11 +97,16 @@ def compare_time_validation(
                                   experiment_names[0], evaluation_threshold)
 
     # 후보·특징 실험 모두 동일한 이름 해석 규칙으로 필요한 Pipeline만 만든다.
-    available_experiments = {
+    if pipeline_templates is not None and set(pipeline_templates) != set(experiment_names):
+        raise ValueError("주입한 Pipeline 이름과 평가 후보 이름이 일치해야 합니다.")
+    # OOF와 같은 설정의 후보를 전달받을 수 있으며 실제 fit은 공통 코어가 복제하여 수행한다.
+    available_experiments = pipeline_templates if pipeline_templates is not None else {
         name: build_pipeline(config, name, n_jobs=n_jobs) for name in experiment_names
     }
 
     rows: list[dict[str, object]] = []
+    selected_features = []
+    prediction_records = []
     for experiment_name in experiment_names:
         # 공통 fit은 전처리·선택·가중치를 Time Train에서만 학습한다.
         started_at = perf_counter()
@@ -110,6 +116,19 @@ def compare_time_validation(
         )
         fit_seconds = perf_counter() - started_at
         positive_scores_array = positive_scores(pipeline, validation_x, config.dataset)
+        # 행별 확률을 남겨 문턱을 다시 탐색하지 않고 확률 분포와 미검출을 진단한다.
+        prediction_records.extend({"experiment": experiment_name, "source_row_index": index,
+                                   "source_row_id": validation_frame[SOURCE_ROW_ID].iloc[position]
+                                   if SOURCE_ROW_ID in validation_frame else None,
+                                   "label": validation_y.iloc[position], "positive_score": float(score),
+                                   "predicted_positive": bool(score >= evaluation_threshold)}
+                                  for position, (index, score) in enumerate(
+                                      zip(validation_frame.index, positive_scores_array)))
+        # 전체 Train에서 다시 학습한 선택 결과를 남긴다. OOF fold별 센서와 같다고 가정하지 않는다.
+        selector = pipeline.named_steps.get("selector")
+        if selector is not None and hasattr(selector, "get_support"):
+            names = pipeline[:-2].get_feature_names_out()[selector.get_support()]
+            selected_features.extend({"experiment": experiment_name, "feature": str(name)} for name in names)
 
         # OOF에서 정한 threshold를 그대로 적용해 시간 구간의 일반화만 확인한다.
         # 이 함수는 Time Validation 결과로 threshold를 다시 탐색하지 않는다.
@@ -135,7 +154,10 @@ def compare_time_validation(
             }
         )
 
-    return pd.DataFrame(rows).sort_values("average_precision", ascending=False)
+    result = pd.DataFrame(rows).sort_values("average_precision", ascending=False)
+    result.attrs["selected_features"] = selected_features
+    result.attrs["predictions"] = prediction_records
+    return result
 
 
 # ==========================================

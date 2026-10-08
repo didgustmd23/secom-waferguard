@@ -397,8 +397,8 @@ def supervised_comparison(results, directory, config):
 # - --supervised-dir는 기존 지도학습 비교 결과를 연결할 때만 사용
 # - 이미 결과가 있는 폴더는 덮어쓰지 않아 과거 실험을 보존
 # ==========================================
-def main():
-    # 파일 위치와 fold·트리 수·병렬화 옵션을 코드 수정 없이 지정한다.
+def parse_args(argv=None):
+    """실험 옵션과 기존 출력 경로 조건을 확인하고 실행 인자를 반환한다."""
     parser = argparse.ArgumentParser(description="정상 전용 Isolation Forest·PCA 시간순 비교")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--train", type=Path, required=True)
@@ -408,25 +408,16 @@ def main():
     parser.add_argument("--inner-splits", type=int, default=2)
     parser.add_argument("--n-estimators", type=int, default=200)
     parser.add_argument("--n-jobs", type=int, default=1)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     # 학습을 시작하기 전에 기존 산출물을 덮어쓰는 실행인지 확인한다.
     if args.output_dir.exists() and any(args.output_dir.iterdir()):
         raise ValueError("결과 폴더가 비어 있지 않습니다. 새 폴더를 지정하세요.")
-    config = load_modeling_config(args.config)
-    train = pd.read_csv(args.train)
-    # 결과 계산 중에는 CSV를 쓰지 않는다. 비교 검증까지 통과한 뒤 저장한다.
-    results = compare_anomalies(train, config, outer_splits=args.outer_splits,
-                               inner_splits=args.inner_splits, n_jobs=args.n_jobs, n_estimators=args.n_estimators)
-    if args.supervised_dir:
-        # 생성 계약과 내부 fold 수는 기간 비교만으로 확인할 수 없으므로 별도 검사한다.
-        metadata = json.loads((args.supervised_dir / "temporal_run.json").read_text(encoding="utf-8"))
-        if (metadata.get("outer_splits") != args.outer_splits or
-            metadata.get("inner_temporal_splits") != args.inner_splits):
-            raise ValueError("지도학습과 이상 탐지의 시간 fold 설정이 다릅니다.")
-        if PROTOCOL_ID in train and metadata.get("training_protocol_id") != train[PROTOCOL_ID].iloc[0]:
-            raise ValueError("지도학습 비교 로그의 Train 생성 계약이 다릅니다.")
-        results["anomaly_compare"] = supervised_comparison(results, args.supervised_dir, config)
-    # 결과 dict의 각 항목을 같은 이름의 CSV로 저장해 노트북과 연결한다.
+    return args
+
+
+def save_results(args, config, train, results):
+    """계산된 결과와 실행 설정을 기존 파일 이름·형식으로 저장한다."""
+    # 저장 단계에서는 모델을 학습하거나 문턱을 다시 선택하지 않는다.
     args.output_dir.mkdir(parents=True, exist_ok=True)
     for name, table in results.items():
         if name == "quality_filter":
@@ -447,6 +438,27 @@ def main():
               "score_definition": {"isolation_forest": "negative_score_samples", "pca_reconstruction": "standardized_reconstruction_mse"}}
     (args.output_dir / "anomaly_run.json").write_text(
         json.dumps(record, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+
+
+def main():
+    """인자 검증 → 기존 실험 코어 실행 → 결과 저장 → 콘솔 요약을 수행한다."""
+    args = parse_args()
+    config = load_modeling_config(args.config)
+    train = pd.read_csv(args.train)
+    # 결과 계산 중에는 CSV를 쓰지 않는다. 비교 검증까지 통과한 뒤 저장한다.
+    results = compare_anomalies(train, config, outer_splits=args.outer_splits,
+                               inner_splits=args.inner_splits, n_jobs=args.n_jobs, n_estimators=args.n_estimators)
+    if args.supervised_dir:
+        # 생성 계약과 내부 fold 수는 기간 비교만으로 확인할 수 없으므로 별도 검사한다.
+        metadata = json.loads((args.supervised_dir / "temporal_run.json").read_text(encoding="utf-8"))
+        if (metadata.get("outer_splits") != args.outer_splits or
+            metadata.get("inner_temporal_splits") != args.inner_splits):
+            raise ValueError("지도학습과 이상 탐지의 시간 fold 설정이 다릅니다.")
+        if PROTOCOL_ID in train and metadata.get("training_protocol_id") != train[PROTOCOL_ID].iloc[0]:
+            raise ValueError("지도학습 비교 로그의 Train 생성 계약이 다릅니다.")
+        results["anomaly_compare"] = supervised_comparison(results, args.supervised_dir, config)
+    # 결과 dict의 각 항목을 같은 이름의 CSV로 저장해 노트북과 연결한다.
+    save_results(args, config, train, results)
     # 콘솔에는 요약만 표시하고 상세 근거는 생성된 CSV에서 확인한다.
     print(results["summary"].to_string(index=False))
     print(results["policy_selection"][["outer_fold", "model_name", "policy_status", "threshold"]].to_string(index=False))

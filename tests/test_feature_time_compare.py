@@ -5,6 +5,7 @@
 # ==========================================
 
 import unittest
+import json
 from dataclasses import replace
 
 import numpy as np
@@ -16,6 +17,88 @@ from src.split_contract import SOURCE_ROW_ID, SPLIT_ROLE, PROTOCOL_ID
 
 
 class FeatureTimeComparisonTest(unittest.TestCase):
+    # ==========================================
+    # M2 단독 정규화·M3 깊이와 정규화 결합의 적용 범위 검증
+    # - 전체 센서 M0와 RF 선택기는 보존하고 최종 분류기만 변경
+    # - 작은 합성 데이터에서 시간순 내부 OOF까지 설정 전달 확인
+    # ==========================================
+    def test_m2_m3_options_and_temporal_records(self):
+        names = ("xgboost_all", "xgboost_rf_top_20")
+        base = build_feature_pipelines(MODELING_CONFIG, experiment_names=names)
+        for depth in (None, 2):
+            with self.subTest(depth=depth):
+                chosen = build_feature_pipelines(MODELING_CONFIG, experiment_names=names,
+                                                topk_xgb_max_depth=depth, topk_xgb_reg_lambda=5)
+                self.assertEqual(chosen[names[0]].named_steps["model"].get_params(),
+                                 base[names[0]].named_steps["model"].get_params())
+                self.assertEqual(chosen[names[1]].named_steps["selector"].estimator.get_params(),
+                                 base[names[1]].named_steps["selector"].estimator.get_params())
+                expected = base[names[1]].named_steps["model"].get_params()
+                expected["reg_lambda"] = 5
+                if depth is not None:
+                    expected["max_depth"] = depth
+                self.assertEqual(chosen[names[1]].named_steps["model"].get_params(), expected)
+                results = compare_feature_time(self.frame(), MODELING_CONFIG, n_estimators=3,
+                                               experiment_names=names, topk_xgb_max_depth=depth,
+                                               topk_xgb_reg_lambda=5)
+                for _, record in results["quality_filter"].iterrows():
+                    params = record.model_parameters
+                    params = json.loads(params) if isinstance(params, str) else params
+                    is_top = record.model_name == names[1]
+                    self.assertEqual(params["reg_lambda"], 5 if is_top else 1)
+                    self.assertEqual(params["max_depth"], depth if is_top and depth is not None else 3)
+        for value in (True, -1, float("nan"), float("inf"), "5"):
+            with self.assertRaisesRegex(ValueError, "유한한 0 이상"):
+                build_feature_pipelines(MODELING_CONFIG, experiment_names=names,
+                                        topk_xgb_reg_lambda=value)
+        # 정규화 0도 유효한 입력이며 문자열·결측값으로 오인하지 않는다.
+        chosen = build_feature_pipelines(MODELING_CONFIG, experiment_names=names, topk_xgb_reg_lambda=0)
+        self.assertEqual(chosen[names[1]].named_steps["model"].reg_lambda, 0)
+        with self.assertRaisesRegex(ValueError, "실험이 없습니다"):
+            build_feature_pipelines(MODELING_CONFIG, experiment_names=(names[0],), topk_xgb_reg_lambda=5)
+
+    # ==========================================
+    # M1 깊이 옵션이 RF 선택기와 전체 센서 M0를 바꾸지 않는지 확인
+    # - 옵션 생략은 기존 동작, 깊이 2는 축소 경로만 변경
+    # - 잘못된 깊이와 적용 대상 없는 요청은 학습 전에 차단
+    # ==========================================
+    def test_m1_changes_only_topk_classifier(self):
+        names = ("xgboost_all", "xgboost_rf_top_20")
+        base = build_feature_pipelines(MODELING_CONFIG, experiment_names=names)
+        chosen = build_feature_pipelines(MODELING_CONFIG, experiment_names=names,
+                                        topk_xgb_max_depth=2)
+        self.assertEqual(chosen[names[0]].named_steps["model"].get_params(),
+                         base[names[0]].named_steps["model"].get_params())
+        self.assertEqual(chosen[names[1]].named_steps["selector"].estimator.get_params(),
+                         base[names[1]].named_steps["selector"].estimator.get_params())
+        expected = base[names[1]].named_steps["model"].get_params()
+        expected["max_depth"] = 2
+        self.assertEqual(chosen[names[1]].named_steps["model"].get_params(), expected)
+        for value in (True, 0, -1, 2.5):
+            with self.assertRaisesRegex(ValueError, "양의 정수"):
+                build_feature_pipelines(MODELING_CONFIG, experiment_names=names,
+                                        topk_xgb_max_depth=value)
+        with self.assertRaisesRegex(ValueError, "실험이 없습니다"):
+            build_feature_pipelines(MODELING_CONFIG, experiment_names=("xgboost_all",),
+                                    topk_xgb_max_depth=2)
+
+    def test_rf_limits_leave_xgboost_unchanged(self):
+        # S1·S2 모두 선택용 RF만 달라지고 최종 분류기는 기준과 같아야 한다.
+        names = ("xgboost_all", "xgboost_rf_top_20")
+        base = build_feature_pipelines(MODELING_CONFIG, experiment_names=names)
+        for depth in (None, 8):
+            chosen = build_feature_pipelines(MODELING_CONFIG, experiment_names=names,
+                                            rf_min_samples_leaf=2, rf_max_depth=depth)
+            selector = chosen[names[1]].named_steps["selector"].estimator
+            self.assertEqual(selector.min_samples_leaf, 2)
+            self.assertEqual(selector.max_depth, depth)
+            for name in names:
+                self.assertEqual(chosen[name].named_steps["model"].get_params(),
+                                 base[name].named_steps["model"].get_params())
+        for value in (True, 0, -1):
+            with self.assertRaises(ValueError):
+                build_feature_pipelines(MODELING_CONFIG, experiment_names=names, rf_min_samples_leaf=value)
+
     @staticmethod
     def frame():
         # 작은 데이터에서도 Top-50 선택이 가능하도록 변동 센서 60개를 만든다.
@@ -75,6 +158,7 @@ class FeatureTimeComparisonTest(unittest.TestCase):
         self.assertEqual(pipelines[names[1]].named_steps["selector"].estimator.n_estimators, 3)
         results = compare_feature_time(
             self.frame(), MODELING_CONFIG, n_estimators=3, experiment_names=names,
+            topk_xgb_max_depth=2,
         )
         self.assertEqual(set(results["summary"].model_name), set(names))
         self.assertEqual(len(results["fold_results"]), 12)
@@ -85,6 +169,11 @@ class FeatureTimeComparisonTest(unittest.TestCase):
         self.assertTrue(top.selection_method.eq("rf_importance").all())
         self.assertFalse(results["candidate_features"].is_final.any())
         chronological = results["quality_filter"]
+        # 시간순 외부 학습과 내부 OOF에서도 M1 설정이 실제 학습 기록에 남아야 한다.
+        for _, record in chronological.iterrows():
+            params = record.model_parameters
+            params = json.loads(params) if isinstance(params, str) else params
+            self.assertEqual(params["max_depth"], 3 if record.model_name == names[0] else 2)
         self.assertTrue((pd.to_datetime(chronological.train_end)
                          < pd.to_datetime(chronological.evaluation_start)).all())
 

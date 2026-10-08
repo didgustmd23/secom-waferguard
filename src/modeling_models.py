@@ -21,8 +21,10 @@ from sklearn.svm import SVC
 from sklearn.utils.validation import check_is_fitted
 
 try:
+    from src.stable_rf_selector import StableRFSelector
     from src.modeling_preprocessing import preprocessing_steps, checked_top_k
 except ModuleNotFoundError:
+    from stable_rf_selector import StableRFSelector
     from modeling_preprocessing import preprocessing_steps, checked_top_k
 
 
@@ -38,7 +40,7 @@ class XGBoostClassifierAdapter(ClassifierMixin, BaseEstimator):
                  n_estimators=300, max_depth=3, learning_rate=0.05,
                  subsample=0.8, colsample_bytree=0.8, reg_lambda=1.0,
                  scale_pos_weight=1.0, random_state=42, n_jobs=1,
-                 importance_type="gain"):
+                 importance_type="gain", class_weight_mode="none"):
         self.positive_label = positive_label
         self.negative_label = negative_label
         self.n_estimators = n_estimators
@@ -52,6 +54,8 @@ class XGBoostClassifierAdapter(ClassifierMixin, BaseEstimator):
         self.n_jobs = n_jobs
         # 선택 기준을 명시적으로 보관한다. gain은 평균 학습 손실 개선량이다.
         self.importance_type = importance_type
+        # 새 시간순 실험에서만 사용한다. 기본 none은 기존 고정 가중치 경로를 유지한다.
+        self.class_weight_mode = class_weight_mode
 
     def fit(self, X, y):
         """원래 label을 인코딩하고 XGBoost 분류기를 학습한다."""
@@ -71,6 +75,13 @@ class XGBoostClassifierAdapter(ClassifierMixin, BaseEstimator):
             raise ValueError("XGBoost 후보는 이진 분류 label 두 종류가 필요합니다.")
         # SECOM처럼 -1/1을 쓰거나 다른 문자열 label을 써도 불량은 항상 1로 학습한다.
         encoded_y = np.asarray(pd.Series(y).eq(self.positive_label), dtype=np.int32)
+        if self.class_weight_mode not in {"none", "sqrt_ratio", "ratio"}:
+            raise ValueError("불량 가중치 방식은 none·sqrt_ratio·ratio 중 하나여야 합니다.")
+        # 현재 fit에 전달된 label만 사용하므로 바깥 평가 구간이나 미래 불량률이 섞이지 않는다.
+        ratio = float((encoded_y == 0).sum() / (encoded_y == 1).sum())
+        self.effective_scale_pos_weight_ = {
+            "none": self.scale_pos_weight, "sqrt_ratio": np.sqrt(ratio), "ratio": ratio,
+        }[self.class_weight_mode]
         self.classes_ = np.asarray([self.negative_label, self.positive_label])
         self.n_features_in_ = X.shape[1]
         if hasattr(X, "columns"):
@@ -85,7 +96,7 @@ class XGBoostClassifierAdapter(ClassifierMixin, BaseEstimator):
             subsample=self.subsample,
             colsample_bytree=self.colsample_bytree,
             reg_lambda=self.reg_lambda,
-            scale_pos_weight=self.scale_pos_weight,
+            scale_pos_weight=self.effective_scale_pos_weight_,
             random_state=self.random_state,
             n_jobs=self.n_jobs,
             importance_type=self.importance_type,
@@ -162,6 +173,78 @@ def build_classifier(config, name, *, n_jobs=1, n_estimators=300):
             n_estimators=n_estimators, random_state=seed, n_jobs=n_jobs,
         )
     raise ValueError(f"정의되지 않은 후보 모델입니다: {name}")
+
+
+# ==========================================
+# RF 선택기에만 복잡도 제한 적용
+# - 최종 분류기 설정은 변경하지 않아 센서 선택 효과만 비교
+# - 기본값은 기존 S0와 동일하며 S1·S2는 호출자가 명시
+# ==========================================
+def configure_rf_selectors(pipelines, *, min_samples_leaf=1, max_depth=None, stability_repeats=0):
+    # bool·0·음수는 sklearn 학습 전에 읽기 쉬운 오류로 차단한다.
+    for name, value in (("min_samples_leaf", min_samples_leaf), ("max_depth", max_depth)):
+        if value is None and name == "max_depth":
+            continue
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError(f"RF 선택기의 {name}는 양의 정수여야 합니다.")
+    found = False
+    if isinstance(stability_repeats, bool) or not isinstance(stability_repeats, int) or stability_repeats < 0 or stability_repeats == 1:
+        raise ValueError("RF 반복 선택 횟수는 0(사용 안 함) 또는 2 이상의 정수여야 합니다.")
+    for pipeline in pipelines.values():
+        selector = pipeline.named_steps.get("selector")
+        if selector is not None and isinstance(getattr(selector, "estimator", None), RandomForestClassifier):
+            # 선택용 RF만 변경하고 pipeline의 model(XGBoost)은 건드리지 않는다.
+            selector.estimator.set_params(min_samples_leaf=min_samples_leaf, max_depth=max_depth)
+            if stability_repeats:
+                # 원본 센서를 재표집해야 하므로 선택기를 대치기 앞에 배치한다.
+                # 내부 bootstrap 전처리는 기존 전처리 경로의 독립 복제본을 사용한다.
+                preprocessing = Pipeline([(name, clone(step)) for name, step in pipeline.steps
+                                          if name not in {"selector", "model"}])
+                # 실제 변환 결과도 selector.fit에서 검사하므로 범주형 인코딩은 묵시적으로 허용하지 않는다.
+                stable = StableRFSelector(clone(selector.estimator), preprocessing, selector.max_features,
+                                          n_repeats=stability_repeats,
+                                          random_state=selector.estimator.random_state)
+                pipeline.steps = [("quality_filter", pipeline.named_steps["quality_filter"]),
+                                  ("selector", stable)] + [
+                                      (name, step) for name, step in pipeline.steps
+                                      if name not in {"quality_filter", "selector", "model"}
+                                  ] + [("model", pipeline.named_steps["model"])]
+            found = True
+    if not found and (min_samples_leaf != 1 or max_depth is not None or stability_repeats):
+        raise ValueError("RF 선택기 설정을 적용할 RF 중요도 실험이 없습니다.")
+    return pipelines
+
+
+# ==========================================
+# RF Top-K 뒤의 최종 XGBoost에만 실험용 깊이·정규화 적용
+# - 전체 센서 M0와 선택용 RF는 기존 설정을 그대로 보존
+# - 옵션 생략 시 기존 S0~S3 동작을 유지
+# - 센서 수·데이터셋에 고정하지 않고 RF Top-K 경로에 적용
+# ==========================================
+def configure_topk_xgb(pipelines, *, max_depth=None, reg_lambda=None):
+    if max_depth is None and reg_lambda is None:
+        return pipelines
+    params = {}
+    # bool도 int로 취급되므로 별도로 차단하고 학습 전에 오류를 전달한다.
+    if max_depth is not None:
+        if isinstance(max_depth, bool) or not isinstance(max_depth, int) or max_depth < 1:
+            raise ValueError("Top-K 최종 XGBoost의 최대 깊이는 양의 정수여야 합니다.")
+        params["model__max_depth"] = max_depth
+    # 정규화 0은 허용하지만 음수·NaN·무한대·문자열·bool은 학습 전에 차단한다.
+    if reg_lambda is not None:
+        if (isinstance(reg_lambda, bool) or not isinstance(reg_lambda, (int, float))
+                or not np.isfinite(reg_lambda) or reg_lambda < 0):
+            raise ValueError("Top-K 최종 XGBoost의 reg_lambda는 유한한 0 이상의 숫자여야 합니다.")
+        params["model__reg_lambda"] = reg_lambda
+    targets = [pipeline for name, pipeline in pipelines.items()
+               if name.startswith("xgboost_rf_top_")
+               and isinstance(pipeline.named_steps.get("model"), XGBoostClassifierAdapter)]
+    if not targets:
+        raise ValueError("설정을 적용할 RF Top-K → XGBoost 실험이 없습니다.")
+    for pipeline in targets:
+        # 선택기 깊이는 건드리지 않아 S0 센서 선택을 유지한다.
+        pipeline.set_params(**params)
+    return pipelines
 
 
 def build_pipeline(config, name, *, n_jobs=1):

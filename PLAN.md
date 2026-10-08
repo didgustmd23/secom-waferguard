@@ -2,6 +2,13 @@
 
 이 문서는 프로젝트의 실험 순서, 역할 분담, 완료 기준과 산출물을 관리합니다. 대외 공개용 프로젝트 소개와 사용 방법은 [README.md](README.md)를 참고합니다.
 
+## 진행 상태 갱신 — 2026-10-08
+
+- 체크는 해당 구현·실험·기록의 완료를 뜻하며 목표 성능 달성이나 현장 배포 승인을 뜻하지 않습니다.
+- V1의 S0·M3 Top-20 연구·데모 모델은 후속 시간 구간 평가까지 수행한 뒤 사용을 중단하고 `models/retired/v1_m3_sensor20/`에 보존했습니다. 당시 완료 이력은 유지하되 현재 V2의 최종 모델·문턱 동결로 해석하지 않습니다.
+- V1은 `time_test.csv`를 이미 평가했습니다. 과거 완전한 미사용 여부는 보증하지 못하며, 이후 같은 구간을 개선 판단에 재사용하면 개발 검증으로 구분합니다. 아래 최종 Test 원칙은 향후 미사용 평가 데이터를 확보했을 때 적용할 기준입니다.
+- 현재 V2는 전체 센서 M0·M3 × 가중치 3수준 비교까지 실행했습니다. 최종 후보는 미확정이며, 다음 작업은 동일한 모델·시간 구간에서 결측 처리 방식을 비교하는 것입니다.
+
 ## 원칙
 
 - 원본 데이터는 `data/raw/`에서 수정하지 않습니다.
@@ -14,9 +21,17 @@
 
 | 담당 | 주요 업무 |
 | --- | --- |
-| A — 이종수 (데이터·분석) | 데이터 확보·병합·정제, EDA, split, 오류·drift 분석, 문서·시각화 |
-| B — 양현승 (모델링·평가) | Pipeline, baseline, 특징 선택, 후보 모델 비교, 반복 CV, threshold, 모델 저장·CLI |
-| 공동 | 데이터 누수 검토, 최종 모델·threshold 동결, Test 평가, 재현성 검증, 발표 |
+| 이종수 (SECOM 데이터·분석 / WM 딥러닝) | 기존 SECOM 데이터 확보·병합·정제, EDA, split, 오류·drift 분석, 문서·시각화. 확장 과제의 WM-811K CNN·ResNet18 학습, 모델 비교·평가, 저장·추론 |
+| 양현승 (SECOM 모델링·평가 / 맵 전처리 에이전트) | 기존 SECOM Pipeline, baseline, 특징 선택, 후보 모델 비교, 반복 CV, threshold, 모델 저장·CLI. 확장 과제의 WM-811K 수집·품질 검사, Lot 분할, 맵 변환·Dataset, 전처리 에이전트 실행·기록 |
+| 공동 | 데이터 누수 검토, 입력 시점·라벨 의미·전달 규격 확정, 최종 모델·threshold 동결, Test 평가, 재현성 검증, 발표 |
+
+### WM-811K 확장 업무 — 2026-10-08 추가
+
+- **맵 전처리 에이전트: 양현승.** 데이터 manifest, Lot 분할, 변환 설정과 학습용 Dataset을 이종수에게 전달한다.
+- **WM 딥러닝: 이종수.** 전달된 데이터 계약을 사용해 작은 CNN·ResNet18을 비교하고 모델·평가·추론 묶음을 만든다.
+- 기존 SECOM 업무 담당은 유지한다. 확장 업무는 **기초 설계 단계**이며 구현·학습 완료로 표시하지 않는다.
+- WM-811K 과제는 검사 이후 웨이퍼맵 패턴 분류로 정의한다. 공개 SECOM과 같은 웨이퍼로 연결하거나 전체 2단계 검출 성능을 주장하지 않는다.
+- 상세 구조, 담당별 산출물, 전달 규격과 완료 기준은 [WM811K_BASIC_DESIGN.md](WM811K_BASIC_DESIGN.md)에서 관리한다.
 
 ## 전체 실행 흐름
 
@@ -34,7 +49,7 @@ Model freeze → Final test (once) → Model bundle
 
 **목표:** UCI SECOM 데이터를 분석 가능한 형태로 만들고 실험 기준을 확정합니다.
 
-### A — 이종수 (데이터·분석)
+### 이종수 (데이터·분석)
 
 - [x] Sensor 데이터와 Label/Timestamp 데이터를 `data/raw/`에 저장
 - [x] Sensor + Label + Timestamp 병합
@@ -50,13 +65,13 @@ Model freeze → Final test (once) → Model bundle
 - 모델 Pipeline의 첫 `quality_filter` 단계가 Profile의 결측률 기준 초과 센서를 먼저 제거하고, 남은 센서에서 상수를 제거한다. 제거 개수·센서명은 결과 CSV의 `quality_filter_log` 또는 OOF의 별도 `_quality_filter.csv`에 학습 fold별로 기록한다. 기존 성능·threshold 결과는 필터 적용 전의 탐색 기록이며 재실행이 필요하다.
 - `secom_merged.csv`와 `dataset_log.csv`는 원본 파일과 Profile로 재생성하는 결과물이다. 저장소에는 코드·설정·문서만 유지하고, 결과 CSV는 `.gitignore`로 제외한다.
 
-### B — 양현승 (모델링·평가)
+### 양현승 (모델링·평가)
 
 - [x] Recall, PR-AUC/AP, Precision, F1, ROC-AUC 평가 기준 확정
 - [x] Baseline과 후보 모델의 비교 조건 설계
 - [x] PCA·L1·Feature Importance 기반 특징 선택 전략 설계
 
-#### B 결정 사항
+#### 양현승 결정 사항
 
 - SECOM 실험의 기본 Fail label은 `1`로 사용한다. 평가 함수는 `positive_label` 설정값을 사용하며, 모델 비교에서는 AP와 Fail Recall을 핵심 지표로, Precision·F1·ROC-AUC를 보조 지표로 기록한다.
   - **이유:** 모든 평가 함수와 confusion matrix에서 불량 클래스를 일관되게 해석하기 위해서다. Recall은 불량을 정상으로 놓치는 False Negative 위험을, AP는 불량 비율이 낮은 데이터에서 threshold와 무관한 순위 성능을 확인한다.
@@ -94,22 +109,26 @@ Model freeze → Final test (once) → Model bundle
 
 **목표:** 재현 가능한 split을 만들고 비교 기준이 될 baseline을 구축합니다.
 
-### A — 이종수 (데이터·분석)
+### 이종수 (데이터·분석)
 
 - [x] 클래스 분포·결측률·Timestamp EDA 및 시각화
-- [x] random Train/Validation/Test = 70/15/15 split, stratify 적용
-- [x] timestamp 기준 time-based split 생성
-- [x] split별 클래스 비율을 `logs/split_summary.csv`에 기록
+- [x] Random Train/Validation/Test = 70/15/15 split, stratify 적용
+- [x] Timestamp 기준 time-based split 생성
+- [x] Split별 클래스 비율을 `logs/split_summary.csv`에 기록
 
-### B — 양현승 (모델링·평가)
+  기존 요약·그림과 통합 split의 `data/splits/integrated/manifest.json`을 확인했습니다. 통합 실행의 기본 요약 경로는 `logs/step3_integrated/`이며 같은 timestamp·그룹 보호에 따라 실제 분할 비율은 목표 비율과 다를 수 있습니다.
+
+### 양현승 (모델링·평가)
 
 - [x] `SimpleImputer(median) → StandardScaler → LogisticRegression` baseline 구현
 - [x] Recall, AP, Precision, F1, ROC-AUC, 학습 시간을 기록
 
 ### 공동
 
-- [ ] Train/Validation/Test 간 데이터 누수와 Pipeline fit 범위 검토
-- [ ] Baseline 결과 검토 및 다음 실험 조건 확정
+- [x] Train/Validation/Test 간 데이터 누수와 Pipeline fit 범위 검토
+- [x] Baseline 결과 검토 및 다음 실험 조건 확정
+
+  기존 Random Train과 Time Validation 중복 이력을 확인하고 교정된 split 계약·학습 fold 내부 전처리 경로를 검토했습니다. 과거 탐색 결과가 독립 미사용 평가로 바뀌었다는 뜻은 아닙니다. Baseline 검토 근거는 보고서 12절입니다.
 
 **예정 산출물:** `data/splits/`, `logs/split_summary.csv`, `logs/baseline_result.csv`, `src/step3_split.py`, `src/step4_baseline.py`
 
@@ -117,12 +136,23 @@ Model freeze → Final test (once) → Model bundle
 
 **목표:** 센서 수와 성능의 trade-off를 분석하고 최종 후보 1~2개를 고릅니다.
 
-### A — 이종수 (데이터·분석)
+### 센서 축소 성능 기준 — 2026-10-07 사용자 결정
 
-- [x] PCA 누적 설명분산과 Feature Importance 시각화
+- 원본 센서 20개 이하 모델은 전체 센서 모델 대비 **AP 상대 하락률 20% 이내를 목표, 30% 이내를 최대 허용**으로 한다. 성능 유지율로는 목표 80% 이상, 최소 허용 70% 이상이다.
+- 계산식은 `(전체 AP - 축소 모델 AP) / 전체 AP × 100`이다. 같은 분류기 설정·분할·평가 대상·검증 방식을 사용하며 전체 센서는 학습 구간의 품질 필터 후 남은 센서 전체를 뜻한다. 시간순 3구간 평균 AP를 우선 비교하고 반복 CV는 별도로 보조 비교한다.
+- 전체 AP가 0이거나 평가에 불량이 없으면 판정 불가로 기록한다. AP 하락률은 불량 미검출 비율이 아니며 Recall·양성 판정 비율·구간별 저하는 별도로 확인한다.
+- 기존 “같은 성능 유지”를 제한적인 성능 손실 허용으로 변경한 프로젝트 기준이다. 최종 Test 결과를 보고 기준을 바꾸지 않는다. 이번 결정만으로 최종 후보 선정·센서 동결·완료 체크를 수행하지 않는다.
+
+상세 결정과 기존 결과의 사후 진단은 [공동 결정 D1](JOINT_DECISIONS.md#d1-성능-유지허용-저하-기준)을 참고한다.
+
+### 이종수 (데이터·분석)
+
+- [ ] PCA 누적 설명분산과 Feature Importance 시각화
 - [x] 센서 수와 AP의 관계 분석
 
-### B — 양현승 (모델링·평가)
+  Top-K·전체 센서와 RF Top-20의 비교는 보고서 26~33절에 기록했습니다. PCA 누적 설명분산·Feature Importance 전용 시각화 완료는 별도로 확인해야 합니다.
+
+### 양현승 (모델링·평가)
 
 - [x] PCA(누적 설명 분산 90%) 실험
 - [x] L1 Logistic Regression 기반 특징 선택
@@ -130,11 +160,16 @@ Model freeze → Final test (once) → Model bundle
 - [x] Logistic Regression, SVM, Random Forest, LightGBM 비교
 - [x] `class_weight` 또는 `scale_pos_weight` 적용 비교
 - [x] Repeated Stratified K-Fold로 평균 ± 표준편차 기록
-- [ ] XGBoost 기본·`scale_pos_weight` 후보를 같은 CV fold에서 비교
+- [x] XGBoost 기본·`scale_pos_weight` 후보를 같은 CV fold에서 비교
+
+  근거: 보고서 25절 및 `logs/xgboost_20261006/`. V2의 시간순 가중치 비교는 아래 별도 진행 항목으로 구분합니다.
 
 ### 공동
 
-- [ ] 성능, 센서 수, 학습·추론 시간을 종합해 후보 선정
+- [x] V1 연구·데모 후보 선정: 전체 과거 학습 + S0 RF Top-20 + M3 XGBoost
+- [ ] V2 성능, 센서 수, 학습·추론 시간을 종합해 최종 후보 선정
+
+  V1 후보 선정은 사용자 결정과 보고서 31~33절에 기록했습니다. M0·S2는 비교 후보로 보존했습니다. 현재 V1은 사용 중단 상태이며, 이 체크는 V2 후보 채택이나 추론 시간 정량 비교 완료를 뜻하지 않습니다.
 
 **예정 산출물:** `logs/feature_compare.csv`, `logs/model_compare.csv`, `reports/figures/pca_variance.png`, `reports/figures/feature_importance.png`, `reports/figures/sensor_count_vs_ap.png`
 
@@ -142,20 +177,24 @@ Model freeze → Final test (once) → Model bundle
 
 **목표:** 운영 관점의 분류 기준을 정하고 최종 설정을 동결합니다.
 
-### A — 이종수 (데이터·분석)
+### 이종수 (데이터·분석)
 
-- [X] False Negative/False Positive 사례 분석
-- [X] Random split과 time-based split의 성능 비교
-- [X] 주요 센서의 시간 변화와 drift 가능성 점검
+- [x] False Negative/False Positive 사례 분석
+- [x] Random split과 time-based split의 성능 비교
+- [x] 주요 센서의 시간 변화와 drift 가능성 점검
 
-### B — 양현승 (모델링·평가)
+  오류 사례는 보고서 9·17·21절, 기존 탐색 분할 비교는 4~8절, 시간 변화·월별 센서 진단은 33절에 기록했습니다. Random/Time 비교는 데이터 사용 이력이 있는 탐색 결과이며 drift가 성능 저하의 확정 원인이라는 뜻은 아닙니다.
+
+### 양현승 (모델링·평가)
 
 - [x] OOF prediction 생성
 - [x] Threshold별 Recall, Precision, FN, FP 비교
-- [ ] XGBoost 후보가 선정되면 해당 모델의 OOF threshold 시나리오 비교
+- [x] XGBoost 후보가 선정되면 해당 모델의 OOF threshold 시나리오 비교
 - [x] 모델 비교·특징 선택·OOF·시간 검증·오류 분석 및 공통 전처리 코드에 한국어 함수 설명 보강
 - [ ] FN/FP trade-off를 바탕으로 최종 threshold 결정
-- [ ] Isolation Forest와 PCA reconstruction error를 보조 실험으로 비교
+- [x] Isolation Forest와 PCA reconstruction error를 보조 실험으로 비교
+
+  XGBoost M3·M0 단일 OOF 시나리오는 `logs/m3_m0_oof_compare/`, 정상 전용 이상 탐지 비교는 보고서 23절과 `logs/anomaly_20261006/`에 기록했습니다. V1 문턱 선택 이력은 있지만 V2의 최종 threshold는 아직 미확정입니다.
 
 #### Threshold 결정 기준 및 현재 프로젝트 후보
 
@@ -176,7 +215,10 @@ Model freeze → Final test (once) → Model bundle
 
 ### 공동
 
-- [ ] 특징 선택, 센서 집합, 모델, 하이퍼파라미터, threshold 동결
+- [x] V1 연구·데모 평가 대상의 특징 선택, 센서 집합, 모델, 하이퍼파라미터, threshold 동결
+- [ ] V2 최종 평가 대상의 특징 선택, 센서 집합, 모델, 하이퍼파라미터, threshold 동결
+
+  사용자 승인으로 V1 센서 20개·저장 전처리 통계·M3 설정·문턱 `0.036539457738399506`을 고정한 뒤 후속 구간을 평가했습니다. 근거는 `FINAL_EVALUATION_REVIEW.md`와 `logs/m3_frozen_time_evaluation/evaluation.json`입니다. 이후 V1 사용 중단은 별도 개선 요청이며 당시 동결·평가 완료 이력을 취소하지 않습니다.
 
 **예정 산출물:** `logs/threshold_compare.csv`, `logs/anomaly_compare.csv`, `reports/figures/error_analysis.png`, `reports/figures/random_vs_time.png`, `reports/figures/sensor_drift.png`
 
@@ -184,35 +226,61 @@ Model freeze → Final test (once) → Model bundle
 
 **목표:** 동결된 설정으로 Test를 한 번 평가하고 재현 가능한 결과물을 준비합니다.
 
-### A — 이종수 (데이터·분석)
+### 이종수 (데이터·분석)
 
 - [ ] confusion matrix와 PR curve 생성
 - [ ] 오류·핵심 센서·drift 분석 결과 정리
 - [ ] 최종 보고서와 README 업데이트
 
-### B — 양현승 (모델링·평가)
+### 양현승 (모델링·평가)
 
-- [ ] Test data 단일 최종 평가
-- [ ] 최종 Recall, AP, Precision, F1, ROC-AUC 기록
+- [x] V1 동결 모델의 Test 역할 후속 시간 구간 단일 평가 (과거 완전한 미사용 여부 보증 불가)
+- [x] V1 후속 평가의 Recall, AP, Precision, F1, ROC-AUC 기록
 - [ ] 전처리·특징 선택·모델을 포함한 Pipeline 저장
-- [ ] threshold, 사용 센서, 버전, 한계를 Model Card에 기록
-- [ ] 신규 데이터 추론 CLI 확인
+- [x] V1의 선택 센서·학습 전처리 통계·분류기를 담은 추론 묶음 저장 및 복원 확인
+- [x] V1 threshold, 사용 센서, 버전, 한계를 Model Card에 기록
+- [x] 센서 입력 추론 CLI 확인 (Train 유래 데모 입력, 신규 데이터 성능 평가 아님)
+
+  V1 후속 평가: `logs/m3_frozen_time_evaluation/evaluation.json`의 `completed`, `refit=false` 확인. 결과는 Recall 11.11%로 정책 미충족이며 보고서 34절에 기록했습니다. 저장·복원 근거는 `logs/m3_sensor_bundle_check/`, Model Card는 `reports/model_card.md`입니다. 전체 학습 Pipeline 저장과 V2 최종 평가·저장은 미완료입니다.
 
 ### 공동
 
+- [x] V1 저장 묶음·별도 프로세스 복원·센서 입력 CLI 데모 확인
+- [x] V1 후속 시간 구간 평가와 한계를 보고서·README·Model Card에 기록
 - [ ] README 절차로 재현성 검증 및 최종 보고서 작성
 - [ ] GitHub 산출물, CLI demo, 발표 자료 최종 점검
+
+  V1 복원 검증과 Train 유래 33행 CLI 데모는 완료했습니다. 프로젝트 전체를 README 절차로 처음부터 재현하는 점검, V2를 포함한 최종 보고서 작성, GitHub 공개·발표 최종 점검은 아직 완료하지 않았습니다.
 
 **예정 산출물:** `logs/test_result.csv`, `models/model.joblib`, `models/model_card.json`, `src/predict_cli.py`, `reports/report.md`
 
 ## 완료 기준
 
-- [ ] 데이터 출처와 라이선스가 문서화되어 있다.
-- [ ] 데이터 정제·제거 내역과 split이 기록되어 있다.
-- [ ] 누수 없는 Pipeline으로 baseline과 후보 모델을 비교했다.
-- [ ] 반복 CV의 평균과 표준편차를 기록했다.
-- [ ] 센서 수와 성능의 trade-off를 분석했다.
+- [x] 데이터 출처와 라이선스가 문서화되어 있다.
+- [x] 데이터 정제·제거 내역과 split이 기록되어 있다.
+- [x] 학습 fold 내부 전처리·선택 Pipeline으로 baseline과 후보 모델을 비교했다. (과거 분할 사용 이력은 별도 명시)
+- [x] 반복 CV의 평균과 표준편차를 기록했다.
+- [x] 센서 수와 성능의 trade-off를 분석했다.
 - [ ] OOF prediction으로 threshold를 결정했다.
-- [ ] Random/time-based 평가와 FN/FP 분석을 수행했다.
+- [x] Random/time-based 탐색 평가와 FN/FP 분석을 수행했다.
 - [ ] Test는 모든 설정을 동결한 뒤 1회만 평가했다.
-- [ ] 모델, threshold, 버전, 재현 방법이 함께 저장되어 있다.
+- [x] V1 모델, threshold, 버전, 재현 방법이 함께 저장되어 있다. (연구·데모 이력, 현재 사용 중단)
+
+현재 최종 완료 기준의 threshold·Test 항목은 V2 기준으로 미완료입니다. V1의 동결 후 단일 평가 이력은 Day 5에 기록했지만 데이터 전체 사용 이력을 보증할 수 없어 엄격한 미사용 최종 Test 완료로 체크하지 않습니다.
+
+## V2 개선 및 구현 정리 — 후속 작업
+
+- [x] 전체 센서 M0·M3 × 가중치 3수준(1·√비율·비율) 실험 구현 및 프리셋 관리
+- [x] 동일한 Train 내부 시간순 외부 3구간·내부 OOF 2구간에서 6개 후보 실행
+- [x] 학습 구간별 실제 가중치·센서 제거·OOF 범위와 실행 설정 기록
+- [x] 평균·구간별 성능과 Recall 80%·양성 판정 비율 40% 정책 결과 확인
+- [ ] V2 최종 모델·전처리·센서·threshold 선정 및 동결
+- [x] P0 중앙값 대치 기준 결과 확보 (`v2_m0_ratio`, M0·비율 가중치)
+- [ ] P1 중앙값 대치 + 결측 indicator 비교 구현·실행
+- [ ] P2 NaN 유지 + XGBoost 자체 결측 처리 비교 구현·실행
+- [x] `evaluate_frozen_model.py`의 실행 흐름·항목별 동결 검증·저장 함수 분리 (합성 테스트 7개 통과)
+- [x] 양현승 실험 CLI 9개 파일의 인자 처리·결과 저장 분리 (관련 합성 테스트 42개 통과)
+
+V2 근거는 `logs/v2_time_weight_compare/`입니다. M0·비율 가중치는 평균 AP 최고 후보이지만 구간별 성능이 불안정하고, 6개 후보 × 3개 학습 구간의 내부 OOF에서 현재 정책 후보를 찾지 못했습니다. 실험 실행 완료와 최종 채택·성능 목표 달성을 구분합니다. P1·P2는 아직 논의한 계획이며 구현·실행 완료가 아닙니다.
+
+리팩토링한 9개 파일은 `check_sensor_inference.py`, `top20_time_validation.py`, `recent_window_compare.py`, `step6_feature_compare.py`, `feature_time_compare.py`, `anomaly_compare.py`, `time_weight_compare.py`, `top20_oof_compare.py`, `temporal_validation.py`입니다. 팀원 통합 파일 `step3_split.py`는 이번 리팩토링에서 제외했습니다.

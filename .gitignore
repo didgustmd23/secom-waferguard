@@ -35,8 +35,13 @@ data/raw/
 /data/splits/**/manifest.json
 
 # 재생성 가능한 평가 실행 상태와 설정 기록
+/logs
 /logs/**/execution.json
 /logs/**/temporal_run.json
 /logs/**/anomaly_run.json
 /logs/**/feature_run.json
+
+# 로컬 후보 모델 묶음 (학습 모델·검증용 센서 입력 포함)
+/models/candidates/
+/models/retired/
 

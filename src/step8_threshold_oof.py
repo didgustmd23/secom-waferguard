@@ -50,6 +50,7 @@ def generate_oof_scores(
     n_jobs: int = 1,
     score_method: str = "single",
     experiment_name: str = EXPERIMENT_NAME,
+    pipeline_template=None,
 ) -> tuple[pd.DataFrame, float]:
     """Train 내부 교차검증으로 OOF 점수와 실행 시간을 만든다.
 
@@ -68,11 +69,16 @@ def generate_oof_scores(
     if labels.nunique() < 2:
         raise ValueError("OOF를 생성하려면 Train에 정상과 Fail label이 모두 있어야 합니다.")
 
-    experiment_pipeline = build_pipeline(config, experiment_name, n_jobs=n_jobs)
+    # 외부에서 준비한 M0·M3도 같은 OOF 코어를 사용한다.
+    # fit_pipeline이 매 fold마다 clone하므로 전달한 객체의 학습 상태는 재사용하지 않는다.
+    experiment_pipeline = (build_pipeline(config, experiment_name, n_jobs=n_jobs)
+                           if pipeline_template is None else pipeline_template)
 
     score_sum = np.zeros(len(train_frame), dtype=float)
     prediction_count = np.zeros(len(train_frame), dtype=int)
     quality_records = []
+    fold_ids = np.zeros(len(train_frame), dtype=int)
+    selected_records = []
     started_at = perf_counter()
 
     for fit_indices, validation_indices in training_folds(features, labels, train_frame, oof_config):
@@ -81,7 +87,14 @@ def generate_oof_scores(
             experiment_pipeline, features.iloc[fit_indices], labels.iloc[fit_indices],
             config, experiment_name, n_jobs=n_jobs,
         )
-        quality_records.append(quality_filter_record(pipeline, fold=len(quality_records) + 1))
+        fold = len(quality_records) + 1
+        quality_records.append(quality_filter_record(pipeline, fold=fold))
+        # 각 샘플의 미학습 예측 fold와 학습 fold에서 고른 센서 목록을 별도로 기록한다.
+        fold_ids[validation_indices] = fold
+        selector = pipeline.named_steps.get("selector")
+        if selector is not None and hasattr(selector, "get_support"):
+            names = pipeline[:-2].get_feature_names_out()[selector.get_support()]
+            selected_records.extend({"cv_fold": fold, "feature": str(name)} for name in names)
         fold_scores = positive_scores(pipeline, features.iloc[validation_indices], config.dataset)
         score_sum[validation_indices] += fold_scores
         prediction_count[validation_indices] += 1
@@ -105,10 +118,13 @@ def generate_oof_scores(
             "training_protocol_id": train_frame[PROTOCOL_ID].iloc[0] if PROTOCOL_ID in train_frame else None,
             "oof_score_method": score_method,
             "threshold_use": "candidate" if score_method == "single" else "analysis_only",
+            # 반복 평균은 여러 fold 예측이 섞이므로 단일 fold 번호를 노출하지 않는다.
+            "cv_fold": fold_ids if score_method == "single" else None,
         }
     )
     # fold별 제거 기록은 샘플별 점수와 별도로 보존해 같은 로그의 중복 저장을 방지한다.
     oof_frame.attrs["quality_filter_records"] = quality_records
+    oof_frame.attrs["selected_features"] = selected_records
     return oof_frame, elapsed_seconds
 
 

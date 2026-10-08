@@ -15,10 +15,24 @@ from src.modeling_config import MODELING_CONFIG, load_dataset_spec, load_modelin
 
 
 class ModelingConfigTest(unittest.TestCase):
+    def test_reduction_policy_loads_and_validates(self):
+        # 비율·순서·자료형 오류는 실험 실행 전에 설정 로더에서 차단한다.
+        policy = MODELING_CONFIG.reduction_policy
+        self.assertEqual(policy.max_sensor_count, 20)
+        self.assertEqual(policy.target_ap_loss_ratio, 0.2)
+        self.assertEqual(policy.max_ap_loss_ratio, 0.3)
+        original = json.loads(Path("config.json").read_text(encoding="utf-8"))["feature_selection"]["reduction_policy"]
+        for key, value in (("max_sensor_count", True), ("max_sensor_count", 0),
+                           ("target_ap_loss_ratio", 0.4), ("max_ap_loss_ratio", float("nan")),
+                           ("comparison_pairs", [["a", "a"]])):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                self._load_variant("feature_selection", "reduction_policy", {**original, key: value})
+
     def test_threshold_policy_loads(self):
         raw = json.loads(Path("config.json").read_text(encoding="utf-8"))
         self.assertEqual(MODELING_CONFIG.threshold_policy.min_recall, raw["threshold_policy"]["min_recall"])
-        self.assertEqual(MODELING_CONFIG.threshold_policy.max_reinspection_ratio, 0.2)
+        self.assertEqual(MODELING_CONFIG.threshold_policy.max_reinspection_ratio,
+                         raw["threshold_policy"]["max_reinspection_ratio"])
 
     def test_rejects_invalid_threshold_policy(self):
         # 잘못된 범위·자료형·선택 규칙을 설정 로드 단계에서 차단한다.

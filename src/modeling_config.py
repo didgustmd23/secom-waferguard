@@ -126,6 +126,15 @@ class ThresholdPolicy:
 # Dataset Profile·실험 조건·평가 정책을 묶은 공통 설정
 # ==========================================
 @dataclass(frozen=True)
+class FeatureReductionPolicy:
+    # 비율은 0~1로 저장한다. AP 손실 정책과 OOF threshold 정책은 독립적이다.
+    max_sensor_count: int
+    target_ap_loss_ratio: float
+    max_ap_loss_ratio: float
+    comparison_pairs: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
 class ModelingConfig:
     dataset: DatasetSpec
     experiment: ExperimentProtocol
@@ -135,6 +144,8 @@ class ModelingConfig:
     baseline_model: str
     candidate_models: tuple[str, ...]
     threshold_policy: ThresholdPolicy = ThresholdPolicy()
+    # 정책을 생략한 다른 데이터셋에는 SECOM의 센서 수·손실 기준을 강제하지 않는다.
+    reduction_policy: FeatureReductionPolicy | None = None
 
 
 # ==========================================
@@ -429,6 +440,27 @@ def load_modeling_config(config_path: Path | str = DEFAULT_CONFIG_PATH) -> Model
     models = _require_mapping(raw_config, "models")
     cv = _require_mapping(experiment, "cross_validation")
 
+    # 센서 축소 정책은 선택 사항이며, 명시한 전체·축소 비교 쌍에만 적용한다.
+    reduction_policy = None
+    if "reduction_policy" in feature_selection:
+        reduction = _require_mapping(feature_selection, "reduction_policy")
+        sensor_count = _require_value(reduction, "max_sensor_count", int)
+        target_loss = float(_require_value(reduction, "target_ap_loss_ratio", (int, float)))
+        max_loss = float(_require_value(reduction, "max_ap_loss_ratio", (int, float)))
+        pairs = _require_value(reduction, "comparison_pairs", list)
+        if sensor_count < 1 or not 0 <= target_loss <= max_loss <= 1:
+            raise ValueError("센서 축소 정책은 센서 수 >= 1, 0 <= 목표 AP 하락률 <= 최대 AP 하락률 <= 1이어야 합니다")
+        if not pairs or any(
+            not isinstance(pair, list) or len(pair) != 2
+            or not all(isinstance(name, str) and name.strip() for name in pair)
+            or pair[0] == pair[1] for pair in pairs
+        ):
+            raise ValueError("comparison_pairs에는 서로 다른 전체·축소 실험 이름 두 개씩을 지정해야 합니다")
+        parsed_pairs = tuple(tuple(pair) for pair in pairs)
+        if len(set(parsed_pairs)) != len(parsed_pairs):
+            raise ValueError("comparison_pairs에는 중복 비교 쌍을 지정할 수 없습니다")
+        reduction_policy = FeatureReductionPolicy(sensor_count, target_loss, max_loss, parsed_pairs)
+
     # 기존 설정 파일도 로드하되, 정책이 있으면 필수 항목·범위를 엄격히 검증한다.
     policy = raw_config.get("threshold_policy", asdict(ThresholdPolicy()))
     if not isinstance(policy, dict):
@@ -512,6 +544,7 @@ def load_modeling_config(config_path: Path | str = DEFAULT_CONFIG_PATH) -> Model
         baseline_model=baseline_model,
         candidate_models=candidate_models,
         threshold_policy=ThresholdPolicy(min_recall, max_reinspection, selection_rule, on_infeasible),
+        reduction_policy=reduction_policy,
     )
 
 
