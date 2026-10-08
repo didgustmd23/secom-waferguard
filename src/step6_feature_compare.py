@@ -176,7 +176,7 @@ def main():
     """CLI에서 설정과 Train 파일을 받아 비교표를 CSV로 기록한다."""
     parser = argparse.ArgumentParser(description="CV 내부 feature 선택 비교")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
-    parser.add_argument("--train", type=Path, required=True)
+    parser.add_argument("--train", type=Path, default=Path("data/splits/integrated/time_train.csv"))
     parser.add_argument("--output", type=Path, default=Path("logs/feature_compare.csv"))
     parser.add_argument("--n-jobs", type=int, default=1)
     parser.add_argument("--experiments", nargs="+",

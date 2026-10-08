@@ -67,21 +67,22 @@ def plot_random_vs_time() -> None:
         RANDOM_TIME_PATH
     )
 
+
     metrics = [
-        "average_precision",
-        "recall",
-        "precision",
-        "f1",
-        "roc_auc",
+        "AP",
+        "Recall",
+        "Precision",
+        "F1",
+        "ROC-AUC",
     ]
 
-    random_row = result[
-        result["split"] == "random"
-    ].iloc[0]
+    random_row = result.loc[
+    result["validation"].astype(str).str.strip().str.lower() == "random"
+].iloc[0]
 
-    time_row = result[
-        result["split"] == "time"
-    ].iloc[0]
+    time_row = result.loc[
+    result["validation"].astype(str).str.strip().str.lower() == "time"
+].iloc[0]
 
     random_values = [
         random_row[m]

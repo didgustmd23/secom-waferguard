@@ -229,7 +229,7 @@ def _parse_arguments() -> argparse.Namespace:
     # 새 평가 경로에서는 integrated/time_train.csv만 입력한다.
     parser = argparse.ArgumentParser(description="후보 모델 OOF threshold 비교")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
-    parser.add_argument("--train", type=Path, required=True)
+    parser.add_argument("--train", type=Path, default=Path("data/splits/integrated/time_train.csv"))
     parser.add_argument("--oof-output", type=Path, default=Path("logs/lightgbm_oof_predictions.csv"))
     parser.add_argument("--threshold-output", type=Path, default=Path("logs/threshold_compare.csv"))
     parser.add_argument("--n-jobs", type=int, default=1)

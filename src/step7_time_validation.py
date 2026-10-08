@@ -178,8 +178,8 @@ def _parse_arguments() -> argparse.Namespace:
     # Test 경로 인자를 제공하지 않아 CLI 단계에서 Test 오용을 막는다.
     parser = argparse.ArgumentParser(description="사전 선택 모델의 Time Validation 비교")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
-    parser.add_argument("--train", type=Path, required=True)
-    parser.add_argument("--validation", type=Path, required=True)
+    parser.add_argument("--train", type=Path, default=Path("data/splits/integrated/time_train.csv"))
+    parser.add_argument("--validation", type=Path, default=Path("data/splits/integrated/time_valid.csv"))
     parser.add_argument("--threshold-report", type=Path,
                         help="새 단일 OOF threshold 비교표. 학습 계약·모델·방식을 검사합니다.")
     parser.add_argument(

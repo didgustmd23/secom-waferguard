@@ -30,7 +30,7 @@ try:
     from src.modeling_preprocessing import preprocessing_steps, quality_filter_record, quality_filter_json
     from src.split_contract import validate_split_pair
 except ModuleNotFoundError:
-    from dataset_schema import validate_dataset_frame
+    from dataset_schema import split_frame_to_xy
     from modeling_config import DEFAULT_CONFIG_PATH, DatasetSpec, ModelingConfig, load_modeling_config
     from modeling_metrics import BinaryMetrics, evaluate_binary_scores
     from modeling_preprocessing import preprocessing_steps, quality_filter_record, quality_filter_json
@@ -227,9 +227,9 @@ def _parse_arguments() -> argparse.Namespace:
     # split 생성 단계가 정한 파일을 명시적으로 받도록 CLI 인자를 정의한다.
     parser = argparse.ArgumentParser(description="Train/Validation Baseline 평가")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
-    parser.add_argument("--train", type=Path, required=True)
-    parser.add_argument("--validation", type=Path, required=True)
-    parser.add_argument("--split-strategy", type=str, required=True)
+    parser.add_argument("--train", type=Path, default=Path("data/splits/integrated/time_train.csv"))
+    parser.add_argument("--validation", type=Path, default=Path("data/splits/integrated/time_valid.csv"))
+    parser.add_argument("--split-strategy", type=str, default="time")
     parser.add_argument("--output", type=Path, default=Path("logs/baseline_result.csv"))
     return parser.parse_args()
 

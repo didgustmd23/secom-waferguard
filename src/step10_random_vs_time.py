@@ -138,8 +138,7 @@ def evaluate_model(
 
     y_prob = model.predict_proba(X_valid)[:, 1]
 
-    y_pred = (y_prob >= 0.5).astype(int)
-
+    y_pred = model.classes_[(y_prob >= 0.5).astype(int)]
     return {
         "AP": average_precision_score(y_valid, y_prob),
         "Recall": recall_score(

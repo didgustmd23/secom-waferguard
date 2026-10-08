@@ -124,8 +124,7 @@ def main() -> None:
     # Train 파일만 받아 후보 비교 결과를 재생성 가능한 CSV로 기록한다.
     parser = argparse.ArgumentParser(description="반복 계층 CV 후보 모델 비교")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
-    parser.add_argument("--train", type=Path, required=True)
-    parser.add_argument("--output", type=Path, default=Path("logs/model_compare.csv"))
+    parser.add_argument("--train", type=Path, default=Path("data/splits/integrated/time_train.csv"))
     arguments = parser.parse_args()
     config = load_modeling_config(arguments.config)
     results = compare_candidates(pd.read_csv(arguments.train), config)

@@ -302,9 +302,9 @@ def _parse_arguments() -> argparse.Namespace:
     # threshold는 필수 인자로 받아 Time Validation에서 임의 탐색하지 않게 한다.
     parser = argparse.ArgumentParser(description="Time Validation FN/FP 사례 분석")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
-    parser.add_argument("--train", type=Path, required=True)
-    parser.add_argument("--validation", type=Path, required=True)
-    parser.add_argument("--threshold", type=float, required=True)
+    parser.add_argument("--train", type=Path, default=Path("data/splits/integrated/time_train.csv"))
+    parser.add_argument("--validation", type=Path, default=Path("data/splits/integrated/time_valid.csv"))
+    parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument(
         "--drift-report", type=Path, default=Path("logs/temporal_drift_report.csv")
     )

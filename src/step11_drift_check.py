@@ -736,16 +736,16 @@ def _parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--train",
         type=Path,
-        required=True,
+        default=Path("data/splits/integrated/time_train.csv"),
         help="Time Train CSV",
     )
 
     parser.add_argument(
         "--validation",
         type=Path,
-        required=True,
+        default=Path("data/splits/integrated/time_valid.csv"),
         help="Time Validation CSV",
-    )
+)
 
     parser.add_argument(
         "--output",
