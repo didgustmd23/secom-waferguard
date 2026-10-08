@@ -18,20 +18,22 @@ import numpy as np
 import pandas as pd
 
 try:
+    from src.feature_reduction import assess_reduction
     from src.dataset_schema import split_frame_to_xy
     from src.modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
     from src.modeling_metrics import evaluate_binary_scores
-    from src.modeling_models import build_experiments, build_pipeline, fit_pipeline, positive_scores
+    from src.modeling_models import build_experiments, build_pipeline, fit_pipeline, positive_scores, configure_rf_selectors, configure_topk_xgb
     from src.modeling_preprocessing import (
         fitted_feature_count, quality_filter_record, quality_filter_json,
         checked_top_k as _checked_top_k,
     )
     from src.split_contract import PROTOCOL_ID, validate_train_role, training_folds
 except ModuleNotFoundError:
+    from feature_reduction import assess_reduction
     from dataset_schema import split_frame_to_xy
     from modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
     from modeling_metrics import evaluate_binary_scores
-    from modeling_models import build_experiments, build_pipeline, fit_pipeline, positive_scores
+    from modeling_models import build_experiments, build_pipeline, fit_pipeline, positive_scores, configure_rf_selectors, configure_topk_xgb
     from modeling_preprocessing import (
         fitted_feature_count, quality_filter_record, quality_filter_json,
         checked_top_k as _checked_top_k,
@@ -55,6 +57,8 @@ def _selected_rows(model, name, fold):
     # PCA는 원본 센서 선택이 아니라 새로운 축 생성이므로 이 목록에 넣지 않는다.
     if selector is None or not hasattr(selector, "get_support"):
         return []
+    if hasattr(selector, "selection_records"):
+        return selector.selection_records({"experiment": name, "cv_fold": fold})
     names = model[:-2].get_feature_names_out()
     mask = selector.get_support()
     estimator = selector.estimator_
@@ -74,7 +78,9 @@ def _selected_rows(model, name, fold):
     ]
 
 
-def compare_features(frame, config, n_jobs: int = 1, *, experiment_names=None):
+def compare_features(frame, config, n_jobs: int = 1, *, experiment_names=None,
+                     rf_min_samples_leaf=1, rf_max_depth=None, rf_stability_repeats=0,
+                     topk_xgb_max_depth=None, topk_xgb_reg_lambda=None):
     """같은 Train CV fold에서 특징 선택 방식별 성능과 특징 수를 비교한다."""
     validate_train_role(frame)
     # Profile 검증을 통과한 특징과 label만 학습에 사용한다.
@@ -106,8 +112,14 @@ def compare_features(frame, config, n_jobs: int = 1, *, experiment_names=None):
         build_experiments(config, n_jobs) if experiment_names is None else
         {name: build_pipeline(config, name, n_jobs=n_jobs) for name in experiment_names}
     )
+    if rf_stability_repeats and config.dataset.categorical_feature_columns:
+        raise ValueError("S3 반복 RF 선택은 수치형 원본 센서 Profile만 지원합니다.")
+    configure_rf_selectors(experiments, min_samples_leaf=rf_min_samples_leaf, max_depth=rf_max_depth,
+                           stability_repeats=rf_stability_repeats)
+    # M1~M3은 RF 선택을 유지하고 축소 경로의 최종 분류기만 변경한다.
+    configure_topk_xgb(experiments, max_depth=topk_xgb_max_depth, reg_lambda=topk_xgb_reg_lambda)
     # 기본 실험 목록은 그대로 두고 명시한 실험만 실행할 수 있도록 한다.
-    rows, fold_rows, selected_rows = [], [], []
+    rows, fold_rows, selected_rows, bootstrap_rows = [], [], [], []
     for name, pipeline in experiments.items():
         fold_metrics, fit_times, feature_counts, quality_records = [], [], [], []
         for fold, (fit_indices, validation_indices) in enumerate(
@@ -142,6 +154,10 @@ def compare_features(frame, config, n_jobs: int = 1, *, experiment_names=None):
                 "fit_time_seconds": fit_times[-1], **asdict(metrics),
             })
             selected_rows.extend(_selected_rows(model, name, fold))
+            # 재표집별 품질 제거 개수와 실제 사용 행 수를 센서 순위 표와 따로 보관한다.
+            selector = model.named_steps.get("selector")
+            bootstrap_rows.extend({"experiment": name, "cv_fold": fold, **record}
+                                  for record in getattr(selector, "bootstrap_log_", []))
 
         protocol_id = frame[PROTOCOL_ID].iloc[0] if PROTOCOL_ID in frame else None
         row = {
@@ -165,39 +181,63 @@ def compare_features(frame, config, n_jobs: int = 1, *, experiment_names=None):
     result = pd.DataFrame(rows).sort_values("average_precision_mean", ascending=False)
     # 기존 요약 CSV 열을 바꾸지 않고 상세 표는 별도 산출물로 전달한다.
     result.attrs["fold_results"] = pd.DataFrame(fold_rows)
-    result.attrs["selected_features"] = pd.DataFrame(selected_rows, columns=[
+    result.attrs["selected_features"] = pd.DataFrame(selected_rows) if selected_rows else pd.DataFrame(columns=[
         "experiment", "cv_fold", "feature", "selection_rank",
         "selection_importance", "feature_space",
     ])
+    # AP 평균은 동일한 CV fold에서 비교한다. PCA·One-Hot 특징은 원본 센서로 세지 않는다.
+    reduction_folds = result.attrs["fold_results"].rename(columns={
+        "cv_fold": "fold", "average_precision": "ap", "selected_feature_count": "sensor_count",
+    }).copy()
+    raw_experiments = set()
+    for name, group in result.attrs["selected_features"].groupby("experiment"):
+        if group.feature_space.eq("raw_sensor").all():
+            raw_experiments.add(name)
+    reduction_folds["is_raw_sensor"] = reduction_folds.experiment.isin(raw_experiments)
+    result.attrs["reduction_assessment"] = assess_reduction(reduction_folds, config.reduction_policy)
+    result.attrs["bootstrap_records"] = pd.DataFrame(bootstrap_rows)
     return result
 
 
-def main():
-    """CLI에서 설정과 Train 파일을 받아 비교표를 CSV로 기록한다."""
+def parse_args(argv=None):
+    """실험 옵션과 기존 출력 경로 조건을 확인하고 실행 인자를 반환한다."""
     parser = argparse.ArgumentParser(description="CV 내부 feature 선택 비교")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--train", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=Path("logs/feature_compare.csv"))
     parser.add_argument("--n-jobs", type=int, default=1)
+    parser.add_argument("--rf-min-samples-leaf", type=int, default=1,
+                        help="RF 선택기 leaf의 최소 샘플 수. S0=1, S1·S2=2입니다.")
+    parser.add_argument("--rf-max-depth", type=int, default=None,
+                        help="RF 선택기의 최대 깊이. 생략하면 제한 없음, S2=8입니다.")
+    parser.add_argument("--rf-stability-repeats", type=int, default=0,
+                        help="S3의 학습 내부 반복 선택 횟수. 0은 기존 단일 선택, 2 이상은 반복 선택입니다.")
+    parser.add_argument("--topk-xgb-max-depth", type=int, default=None,
+                        help="RF Top-K 뒤 최종 XGBoost만 변경합니다. M1=2, 전체 센서 M0·RF는 유지합니다.")
+    parser.add_argument("--topk-xgb-reg-lambda", type=float, default=None,
+                        help="RF Top-K 뒤 최종 XGBoost의 L2 정규화. M2·M3=5, 전체 센서 M0·RF는 유지합니다.")
     parser.add_argument("--experiments", nargs="+",
                         help="비교할 실험 이름. 생략하면 기존 PCA·L1·LightGBM 목록을 실행합니다.")
     parser.add_argument("--details-dir", type=Path,
                         help="fold별 지표·선택 센서·실험 설정을 저장할 비어 있는 폴더입니다.")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.details_dir is not None and args.details_dir.exists() and any(args.details_dir.iterdir()):
         raise ValueError("상세 결과 폴더가 비어 있지 않습니다. 새 폴더를 지정하세요.")
-    config = load_modeling_config(args.config)
-    result = compare_features(
-        pd.read_csv(args.train), config, args.n_jobs, experiment_names=args.experiments,
-    )
-    # 최신 실행 결과를 저장하지만 Test와 외부 Validation은 입력받지 않는다.
+    return args
+
+
+def save_results(args, config, result):
+    """계산된 결과와 실행 설정을 기존 파일 이름·형식으로 저장한다."""
+    # 저장 단계에서는 모델을 학습하거나 문턱을 다시 선택하지 않는다.
     args.output.parent.mkdir(parents=True, exist_ok=True)
     result.to_csv(args.output, index=False, encoding="utf-8-sig")
     if args.details_dir is not None:
         args.details_dir.mkdir(parents=True, exist_ok=True)
-        for name in ("fold_results", "selected_features"):
+        for name in ("fold_results", "selected_features", "reduction_assessment"):
             result.attrs[name].to_csv(args.details_dir / f"{name}.csv", index=False, encoding="utf-8-sig")
+        if not result.attrs["bootstrap_records"].empty:
+            result.attrs["bootstrap_records"].to_csv(args.details_dir / "bootstrap_records.csv", index=False, encoding="utf-8-sig")
         # 코드 변경 감지용 해시는 추가하지 않고 실제 실행의 설정·버전을 보관한다.
         record = {
             "config": asdict(config), "train_path": str(args.train.resolve()),
@@ -205,11 +245,37 @@ def main():
             "training_protocol_id": result.training_protocol_id.iloc[0],
             "versions": {name: version(name) for name in ("scikit-learn", "lightgbm", "xgboost")},
             "is_final_selection": False,
+            "topk_xgb_parameters": {"max_depth_override": args.topk_xgb_max_depth,
+                                    "reg_lambda_override": args.topk_xgb_reg_lambda,
+                                    "targets": [name for name in result.experiment
+                                                if name.startswith("xgboost_rf_top_")]
+                                    if args.topk_xgb_max_depth is not None or args.topk_xgb_reg_lambda is not None else []},
+            "rf_selector_parameters": {"min_samples_leaf": args.rf_min_samples_leaf,
+                                       "max_depth": args.rf_max_depth,
+                                       "stability_repeats": args.rf_stability_repeats,
+                                       "resampling": "stratified_bootstrap" if args.rf_stability_repeats else None},
         }
         (args.details_dir / "feature_run.json").write_text(
             json.dumps(record, ensure_ascii=False, indent=2, default=str), encoding="utf-8",
         )
+
+
+def main():
+    """인자 검증 → 기존 실험 코어 실행 → 결과 저장 → 콘솔 요약을 수행한다."""
+    args = parse_args()
+    config = load_modeling_config(args.config)
+    result = compare_features(
+        pd.read_csv(args.train), config, args.n_jobs, experiment_names=args.experiments,
+        rf_min_samples_leaf=args.rf_min_samples_leaf, rf_max_depth=args.rf_max_depth,
+        rf_stability_repeats=args.rf_stability_repeats,
+        topk_xgb_max_depth=args.topk_xgb_max_depth, topk_xgb_reg_lambda=args.topk_xgb_reg_lambda,
+    )
+    # 최신 실행 결과를 저장하지만 Test와 외부 Validation은 입력받지 않는다.
+    save_results(args, config, result)
     print(result.drop(columns="quality_filter_log").to_string(index=False))
+    if not result.attrs["reduction_assessment"].empty:
+        print("센서 축소 AP 판정 (최종 선정·threshold 정책과 별도)")
+        print(result.attrs["reduction_assessment"].to_string(index=False))
 
 
 if __name__ == "__main__":

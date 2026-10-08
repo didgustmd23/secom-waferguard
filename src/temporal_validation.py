@@ -245,8 +245,8 @@ def compare_temporal(frame, config, *, outer_splits=3, inner_splits=2,
             "quality_filter": pd.DataFrame(quality)}
 
 
-def main():
-    """CLI에서 시간 검증을 실행하고 결과 산출물을 저장한다."""
+def parse_args(argv=None):
+    """실험 옵션과 기존 출력 경로 조건을 확인하고 실행 인자를 반환한다."""
     parser = argparse.ArgumentParser(description="Train 내부 시간순 OOF·threshold 전이 검증")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--train", type=Path, required=True)
@@ -255,13 +255,15 @@ def main():
     parser.add_argument("--inner-splits", type=int, default=2)
     parser.add_argument("--models", nargs="+", default=list(DEFAULT_MODELS))
     parser.add_argument("--n-jobs", type=int, default=1)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.output_dir.exists() and any(args.output_dir.iterdir()):
         raise ValueError("결과 폴더가 비어 있지 않습니다. 기존 결과를 보존할 새 폴더를 지정하세요.")
-    config = load_modeling_config(args.config)
-    train_frame = pd.read_csv(args.train)
-    results = compare_temporal(train_frame, config, outer_splits=args.outer_splits,
-                               inner_splits=args.inner_splits, model_names=tuple(args.models), n_jobs=args.n_jobs)
+    return args
+
+
+def save_results(args, config, train_frame, results):
+    """계산된 결과와 실행 설정을 기존 파일 이름·형식으로 저장한다."""
+    # 저장 단계에서는 모델을 학습하거나 문턱을 다시 선택하지 않는다.
     args.output_dir.mkdir(parents=True, exist_ok=True)
     for name, table in results.items():
         if name == "quality_filter":
@@ -282,6 +284,16 @@ def main():
             record["xgboost"] = None
     (args.output_dir / "temporal_run.json").write_text(
         json.dumps(record, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+
+
+def main():
+    """인자 검증 → 기존 실험 코어 실행 → 결과 저장 → 콘솔 요약을 수행한다."""
+    args = parse_args()
+    config = load_modeling_config(args.config)
+    train_frame = pd.read_csv(args.train)
+    results = compare_temporal(train_frame, config, outer_splits=args.outer_splits,
+                               inner_splits=args.inner_splits, model_names=tuple(args.models), n_jobs=args.n_jobs)
+    save_results(args, config, train_frame, results)
     print(results["summary"].to_string(index=False))
     print(f"결과 저장 경로: {args.output_dir}")
 

@@ -6,30 +6,43 @@
 
 실험 일정, 역할 분담, 완료 기준은 [PLAN.md](PLAN.md)에서 관리합니다.
 
+WM-811K 확장 과제의 역할 분담과 기초 설계는 [WM811K_BASIC_DESIGN.md](WM811K_BASIC_DESIGN.md)에 정리했습니다. 맵 전처리 에이전트는 **양현승**, WM 딥러닝은 **이종수**가 담당합니다. 현재 설계 단계이며, 검사 이후 웨이퍼맵 패턴 분류를 기존 SECOM 센서 기반 위험 예측과 별도로 검증합니다.
+
 ## 현재 구현 상태
+
+**현재 후속 작업:** V1 모델 사용을 중단하고 전체 센서에서 M0·M3 × 불량 가중치 3수준의 V2 시간순 비교를 준비했습니다. 아직 실제 데이터 실행 전입니다. [실험 설정·실행 방법](TIME_IMPROVEMENT_V2.md)을 참고하세요. 아래 동결·평가 수치는 V1의 기록입니다.
 
 | 구분 | 상태 | 내용 |
 | --- | --- | --- |
 | 범용 설정 코어 | 완료 | `config.json`과 Dataset Profile을 분리해 로드·검증 |
 | 데이터 구조 검증 | 완료 | Profile 기준 label·metadata·feature 컬럼 검증 |
 | 공통 평가 | 완료 | Profile label 기반 Recall, AP, Precision, F1, ROC-AUC 계산 |
-| 자동 테스트 | 완료 | 설정·schema·평가·전처리·split 계약·실험 함수 및 모델 코어 123개 테스트 |
+| 자동 테스트 | 구현·검증 | 최신 저장·추론·동결 평가 관련 합성 테스트 17개 통과 (전체 프로젝트 테스트 최신 재실행과 구분) |
 | 데이터 병합·품질 점검 | 완료 | Profile 기반 canonical 병합과 재생성 가능한 품질 로그 |
 | Random / Time split | 구현 완료 | 팀원의 `step3_split.py`에 Profile·누수 검사·원본 ID를 통합. Random은 탐색용, 후보 비교·OOF는 Time Train 사용 |
 | Baseline | 완료 | Train/Validation 기반 Logistic Regression 평가 및 공통 지표 기록 |
-| 후보 모델·불균형 비교 | 비교 완료 | XGBoost 기본·`scale_pos_weight`를 포함한 8개 후보 재실행. 기본 XGBoost CV AP 0.2490; 최종 후보 미확정 |
-| 특징 선택 비교 | 비교 완료 | PCA·L1·LightGBM Top-K 및 XGBoost/RF 선택 Top-20 비교. RF Top-20의 CV AP 0.2459, 시간순 AP 0.1177로 성능 유지 미확인·센서 동결 대기 |
+| 후보 모델·불균형 비교 | 비교 완료 | 8개 후보 및 M0~M3 비교 후 S0·M3를 연구·데모 평가 대상으로 동결. M0·S2 보존 |
+| 특징 선택 비교 | 비교 완료 | PCA·L1·Top-K 비교, 후보 센서 20개 동결. 기존 동일 M3 Validation AP 상대 하락 14.60%지만 현장 탐지 성능 미달 |
 | 시간 변화 진단 | 완료 | Time Train/Validation drift 우선순위: 높음 242개, 중간 102개, 낮음 246개 |
-| Time Validation | 완료 | LightGBM 전체 특성 및 L1 선택 후보의 시간 구간 일반화 성능 확인 |
-| OOF threshold 비교 | 비교 완료 | LightGBM 및 XGBoost 두 후보의 단일 OOF·재검사 부담 기록. XGBoost도 90%·20% 정책 미충족 |
-| 최종 Test·모델 배포 | 미완료 | Time Validation 성능 개선·모델 재선정 후 Test 1회 평가, Pipeline 저장·Model Card·예측 CLI 구현 예정 |
+| Time Validation | 완료·목표 미달 | S0·M3 고정 문턱에서 Recall 5.88%·AP 0.077252. 분포 진단·최근 기간 학습 대조 정리 |
+| OOF threshold 비교 | 선택·동결 | 임시 80%·40% 정책 문턱 0.036539457738399506. Train 단일 OOF Recall 80.77%·양성 비율 37.14% |
+| 20개 센서 저장·추론 | 연구·데모 구현 완료 | 전체·축소 입력 정합성, 후보 저장·별도 프로세스 복원·CSV CLI 확인. Model Card 작성 |
+| 후속 시간 구간 평가 | 완료·목표 미달 | 236행·불량 9건: TP 1·FN 8·FP 30, Recall 11.11%·AP 0.040461. 과거 완전한 미사용 여부 보증 불가 |
+| 현장 배포 | 미승인 | 성능 정책 미충족. 연구·데모 묶음 보존, 결과에 맞춘 재조정·자동 재평가 없음 |
 
 기존 Time Validation 235행 중 163행이 Random Train에도 포함되어 있었다. 아래 기존 성능 수치는 **탐색 실험 기록**이며 독립적인 미사용 holdout 평가로 해석하지 않는다. 교정된 실행 경로는 시간 split을 먼저 생성하고, 동일한 Time Train에서 후보 비교·특징 선택·OOF를 수행한다. 이미 관찰한 데이터의 재분할이 새로운 미사용 평가 데이터를 만들지는 않으므로, 엄격한 최종 검증에는 별도의 미사용 데이터가 필요하다.
+
+### 현재 결론
+
+**20개 센서 추론·저장·복원은 검증했지만, 시간 일반화와 불량 검출 성능 목표는 달성하지 못했습니다.** 동결 저장 모델의 후속 구간에서 Recall 11.11%·Precision 3.23%·ROC-AUC 0.488008·양성 판정 비율 13.14%였습니다. 선별 비율이 낮더라도 불량 9건 중 8건을 놓쳤으므로 운영 가능한 조기 탐지 모델이라고 주장하지 않습니다.
+
+사용자가 저장 객체를 재학습 없이 평가했으며 모델·센서·threshold는 변경하지 않습니다. `time_test.csv`를 사용했지만 과거 완전한 미사용 여부는 보증하지 못합니다. 상세 근거는 [보고서 34절](reports/report.md#34-동결-저장-모델의-후속-시간-구간-평가-2026-10-07)과 [Model Card](reports/model_card.md)에 있습니다. 아래 과거 수치는 해당 실험 이력이며 최신 성능으로 혼용하지 않습니다.
 
 ## 프로젝트 목표
 
 - 불량 클래스의 **Recall**과 **PR-AUC (Average Precision)** 를 중심으로 모델을 평가합니다.
 - 약 590개의 공정 특징에서 성능 저하를 최소화하는 핵심 센서를 찾습니다.
+- 원본 센서 **20개 이하**로 축소하며, 동일한 검증 조건의 전체 센서 모델 대비 **AP 상대 하락률 20% 이내를 목표, 30% 이내를 최대 허용**으로 합니다(유지율 목표 80%·최소 70%). Recall·양성 판정 비율·구간별 저하는 별도로 확인하며, 이는 현장 표준이나 성능 동등성의 증명이 아닌 프로젝트 기준입니다. [상세 결정](JOINT_DECISIONS.md#d1-성능-유지허용-저하-기준)
 - 반복 계층 교차 검증으로 성능의 평균과 편차를 함께 확인합니다.
 - Random split과 시간 순서 기반 평가를 비교해 데이터 드리프트 가능성을 점검합니다.
 - 전처리부터 추론까지 재현 가능한 Pipeline을 구성합니다.
@@ -144,13 +157,17 @@ pip install -r requirements.txt
 - `config.json`: 난수 시드, 후보 모델 비교용 `default_threshold`, CV처럼 데이터셋과 독립적인 실험 조건
 - `configs/datasets/secom.json`: SECOM의 원본 source, 입력 경로, label 값, 컬럼 역할, timestamp 형식, feature 타입·선택 규칙, 데이터 품질 기준
 
+센서 축소 허용 기준은 `feature_selection.reduction_policy`에서 설정합니다. `max_sensor_count: 20`, `target_ap_loss_ratio: 0.2`, `max_ap_loss_ratio: 0.3`은 각각 센서 수 상한·AP 상대 하락률 목표·최대 허용입니다. `comparison_pairs`는 같은 분류기 설정의 `[전체 실험 이름, 축소 실험 이름]` 쌍을 지정합니다. 정책을 생략하면 다른 데이터셋에 이 기준을 강제하지 않습니다. Recall·양성 판정 비율의 `threshold_policy`와는 독립적입니다.
+
+Step 6는 판정표를 출력하고 `--details-dir` 지정 시 `reduction_assessment.csv`로 저장합니다. 시간순 특징 비교는 출력 폴더에 같은 파일을 저장합니다. `목표 달성`, `허용 범위·목표 미달`, `허용 하락률 초과`, `판정 불가`를 구분하고 원본 센서 수 충족 여부를 별도로 기록합니다. 기준 모델 누락·fold 불일치·정의 불가 AP는 성공으로 처리하지 않으며, 이 표만으로 최종 모델을 자동 선정하지 않습니다.
+
 `src/modeling_config.py`는 두 설정을 함께 읽어 `ModelingConfig`와 `DatasetSpec`으로 검증합니다. `src/dataset_schema.py`는 Profile 기준으로 label·metadata·feature 컬럼과 수치형 규칙을 검증합니다. 따라서 새 데이터셋에는 코어 코드를 고치지 않고 같은 형식의 Dataset Profile을 추가합니다.
 
 `src/modeling_metrics.py`는 Dataset Profile에서 전달받은 정상·불량 label을 기준으로 Recall, AP, Precision, F1, ROC-AUC와 confusion matrix를 공통 계산합니다.
 
 주요 함수에는 입력 데이터의 역할, 처리 결과, 평가 구간 분리 이유를 한국어 docstring으로 설명합니다. 특히 `src/modeling_preprocessing.py`와 `src/split_contract.py`는 공통 전처리·누수 방어 규칙을, `src/threshold_policy.py`는 threshold 정책 선택 기준을 설명합니다. `src/step5_model_compare.py`부터 `src/step9_error_analysis.py` 및 `src/temporal_validation.py`에는 각 실험의 데이터 사용 범위와 검증 목적을 기록해 코드만 읽어도 평가 흐름을 따라갈 수 있도록 했습니다.
 
-담당 B의 모델 정의·Pipeline 생성·fold별 학습·양성 확률 추출은 `src/modeling_models.py`로 통합했습니다. 각 Step은 실험 실행과 결과 기록을 맡으며, 공통 데이터 분리는 `dataset_schema.py`, 시간 fold 생성은 `split_contract.py`, threshold 출처 검사는 `threshold_policy.py`를 사용합니다. 기존 Step 실행 명령과 CSV 열은 유지합니다. Step 8의 XGBoost에도 `--n-jobs`가 적용되며, Step 9는 `--experiment`로 사전 선택한 모델을 지정할 수 있습니다. 기본값은 기존 `lightgbm_all`입니다.
+양현승의 모델 정의·Pipeline 생성·fold별 학습·양성 확률 추출은 `src/modeling_models.py`로 통합했습니다. 각 Step은 실험 실행과 결과 기록을 맡으며, 공통 데이터 분리는 `dataset_schema.py`, 시간 fold 생성은 `split_contract.py`, threshold 출처 검사는 `threshold_policy.py`를 사용합니다. 기존 Step 실행 명령과 CSV 열은 유지합니다. Step 8의 XGBoost에도 `--n-jobs`가 적용되며, Step 9는 `--experiment`로 사전 선택한 모델을 지정할 수 있습니다. 기본값은 기존 `lightgbm_all`입니다.
 
 `quality_rules.missing_ratio_threshold`와 `drop_zero_variance`는 공통 Pipeline의 `quality_filter` 단계에 적용됩니다. Validation에는 Train에서 결정한 센서 목록을 그대로 사용합니다. Baseline·모델 비교·특징 비교·시간 검증 결과 CSV의 `quality_filter_log`는 학습별 제거 개수·센서명·기준을 JSON 배열로 기록합니다. OOF는 점수 CSV 옆의 `<점수파일명>_quality_filter.csv`에 fold별 기록을 저장합니다. 품질 필터 도입 전의 성능·OOF threshold는 과거 결과이며, 필터 적용 후 재실행 결과는 `logs/quality_filtered_20261006/`에 저장했습니다.
 
@@ -270,7 +287,7 @@ python src/step6_feature_compare.py --train data/splits/integrated/time_train.cs
 python src/feature_time_compare.py --train data/splits/integrated/time_train.csv --experiments xgboost_all xgboost_rf_top_20 --output-dir logs/xgboost_top20_time_run --n-jobs 2
 ```
 
-실제 시간 구간 평균 AP는 전체 **0.1553**, RF Top-20 **0.1177**이었으며 세 구간 모두 전체 모델이 높았습니다. 과거 OOF의 F1 최대 진단 문턱을 다음 구간에 적용하면 RF Top-20의 합산 Recall은 69.23%지만 양성 판정 비율도 59.47%였습니다. 90%·20% 정책은 두 모델·세 구간 모두 미충족으로, “20개로 같은 성능 유지”는 아직 입증하지 못했습니다. 결과는 `logs/xgboost_top20_time_20261006/`와 [보고서 27절](reports/report.md#27-xgboost-전체-vs-rf-top-20-시간순-검증-2026-10-06)에 기록했으며 외부 Validation·Test는 사용하지 않았습니다.
+실제 시간 구간 평균 AP는 전체 **0.1553**, RF Top-20 **0.1177**이었으며 세 구간 모두 전체 모델이 높았습니다. 2026-10-07 결정한 기준으로 사후 해석하면 AP 상대 하락률 **약 24.25%**로 최대 허용 30% 안이지만 목표 20%에는 미달합니다. 이는 같은 성능 유지나 최종 선정 완료를 뜻하지 않습니다. 과거 OOF의 F1 최대 진단 문턱을 다음 구간에 적용하면 RF Top-20의 합산 Recall은 69.23%지만 양성 판정 비율도 59.47%였습니다. Recall 90%·양성 판정 비율 20% 정책은 두 모델·세 구간 모두 미충족입니다. 결과는 `logs/xgboost_top20_time_20261006/`와 [보고서 27절](reports/report.md#27-xgboost-전체-vs-rf-top-20-시간순-검증-2026-10-06)에 기록했으며 외부 Validation·Test는 사용하지 않았습니다.
 
 시간순 센서 축소 비교는 `src/feature_time_compare.py`로 실행합니다. 전체 센서·LightGBM 중요도 Top-50/20·RF 중요도 Top-50/20을 동일한 LightGBM 분류기로 비교합니다. 선택기는 각 학습 fold 내부에서만 fit하며 기존 시간 검증 코어의 외부 3구간·내부 시간순 OOF 2구간을 재사용합니다.
 
@@ -301,7 +318,7 @@ python src/run_evaluation.py --change threshold --threshold <비교표의_반올
 python src/run_evaluation.py --change policy --train data/splits/integrated/time_train.csv --validation data/splits/integrated/time_valid.csv --run-dir logs/evaluation_run --n-jobs 2
 ```
 
-threshold 생략 시 `config.json`의 `threshold_policy`로 OOF 후보를 선택합니다. `min_recall: 0.7`은 최소 Recall, `max_reinspection_ratio: 0.2`는 `(TP + FP) / 전체 표본 수`의 상한입니다. 현재 값은 프로젝트용 예시이며 현장 표준이나 공동 확정 기준이 아닙니다. `selection_rule: "min_reinspection"`은 조건을 충족하는 후보 중 재검사 비율 최소 → Recall 최대 → threshold 최대 순으로 선택합니다. `on_infeasible: "report_only"`는 후보가 없으면 F1 최대값으로 대체하지 않고 미충족을 기록하며 시간 검증을 생략합니다. 후보별 판단은 `policy_candidates.csv`, 실행 여부는 `execution.json`에 기록합니다. 생략 시 과거 `time_validation.csv`가 남아 있어도 이번 실행 결과로 해석하지 않습니다.
+threshold 생략 시 `config.json`의 `threshold_policy`로 OOF 후보를 선택합니다. 현재 사용자 결정의 프로젝트 임시 정책은 `min_recall: 0.8`(최소 Recall 80%), `max_reinspection_ratio: 0.4`(양성 판정 비율 상한 40%)입니다. 비율은 `(TP + FP) / 전체 표본 수`이며 실제 재검사 수행량이나 현장 표준을 뜻하지 않습니다. `selection_rule: "min_reinspection"`은 조건을 충족하는 후보 중 재검사 비율 최소 → Recall 최대 → threshold 최대 순으로 선택합니다. `on_infeasible: "report_only"`는 후보가 없으면 F1 최대값으로 대체하지 않고 미충족을 기록하며 시간 검증을 생략합니다. 후보별 판단은 `policy_candidates.csv`, 실행 여부는 `execution.json`에 기록합니다. 생략 시 과거 `time_validation.csv`가 남아 있어도 이번 실행 결과로 해석하지 않습니다. 과거 90%·20% 로그는 당시 조건으로 보존하며 새 정책 적용 결과가 아닙니다. M3 RF Top-20의 후속 평가 연결은 [개선 계획](SECOM_TOP20_PLAN.md)에 별도로 기록합니다.
 
 `--change policy`는 정책만 바뀐 경우 OOF를 재사용하며 `--threshold`는 지정하지 않습니다. 학습 설정·Train 경로가 바뀌면 재사용을 거부합니다. 같은 경로의 파일 내용이나 코드 변경은 자동 감지하지 않으므로 해당 변경 유형으로 OOF부터 재생성해야 합니다. 수동 `--threshold` 지정은 정책을 우회하는 연구용 실행이며 정책 충족을 뜻하지 않습니다. 연결 대상은 `--experiment`로 `lightgbm_all`, `xgboost`, `xgboost_scale_pos_weight` 중에서 지정합니다(기본값 `lightgbm_all`). Baseline·모델 비교·특징 비교·오류 분석은 아래 개별 명령으로 실행합니다. OOF 재사용 시에도 Step 7은 동일 Train으로 모델을 다시 학습합니다. 개별 Step 7 실행에는 실행 상태 검사가 적용되지 않습니다. 최종 Test 평가 전에 정책을 확정하고 Test 결과에 맞춰 바꾸지 않습니다.
 
@@ -354,6 +371,41 @@ Step 3을 재실행할 때는 새로운 `--output-dir`과 `--log-dir`을 지정�
 
 모든 모델링 Pipeline은 센서 품질 필터 이후 수치형 median 대치와 선언된 범주형 최빈값 대치/One-Hot Encoding을 공통으로 사용한다. SECOM의 결측률 50% 초과 기준에서는 전부 결측인 컬럼도 제거한다. Profile에서 품질 제거를 비활성화한 경우에는 전부 결측인 수치형 컬럼을 대치 단계에서 0으로 보존한다. Top-K와 특징 수는 변환 후 기준이며 범주형 입력에서는 센서 원본 컬럼 수와 One-Hot 특징 수가 다를 수 있다.
 
+## 저장된 후보 모델로 센서 CSV 예측
+
+학습 범위·고정 센서 목록·후보 threshold·시간순 성능·사용 제한은 [후보 Model Card](reports/model_card.md)에 정리했습니다. 최종 모델이나 배포 승인 문서가 아닙니다.
+
+후속 평가의 사용 이력 점검·사용자 동결 승인은 [최종 평가 점검](FINAL_EVALUATION_REVIEW.md)에 기록했습니다. 사용자가 동결 모델 평가를 완료했지만 과거 완전한 미사용 여부는 보증하지 못하며 현장 배포 승인도 아닙니다.
+
+`src/predict_cli.py`는 저장된 센서 목록·학습 median·분류기·후보 threshold로만 예측합니다. 설정 변경·재학습·성능 평가는 하지 않습니다. S0·M3 Top-20은 연구·데모용 후보이며 시간순 검증 목표 미달이라는 한계가 남아 있습니다.
+
+프로젝트 루트에서 실행합니다. joblib은 코드 실행 위험이 있으므로 직접 생성한 신뢰한 파일에만 신뢰 옵션을 사용하세요.
+
+```powershell
+python -m src.predict_cli --bundle-dir models/candidates/m3_sensor20 --input data/processed/new_sensor20.csv --output logs/new_sensor20_predictions.csv --trusted-local-bundle
+```
+
+- UTF-8 CSV 첫 행은 `manifest.json`의 `sensors`에 기록된 센서명입니다. 해당 센서만 포함하며 순서는 달라도 됩니다.
+- label·timestamp·행 ID·인덱스·추가 센서는 제외합니다. 누락·중복 센서는 오류입니다.
+- 값은 숫자여야 합니다. 빈 값·NaN은 저장된 median으로 대치합니다. 무한대·잘못된 타입·모든 필수 센서가 결측인 행은 거부합니다.
+- 한 행 이상 필요하며 입력 오류 시 일부 행을 자동 제외하지 않습니다. 기존 출력 파일도 덮어쓰지 않습니다.
+- 센서 의미·단위는 학습 데이터와 같아야 합니다. 다른 공장에 모델을 그대로 적용할 수 있다는 뜻은 아닙니다.
+
+출력은 `input_row_index`(0부터 시작하는 입력 데이터 행 번호), `positive_score`(모델 양성 확률 출력), `predicted_positive`(저장된 문턱 이상 여부), `predicted_label`(원래 label)입니다. 확률 보정이나 실제 불량 확정을 보장하지 않습니다.
+
+신규 입력이 없다면 저장된 검증 행으로 CLI 동작만 확인할 수 있습니다.
+
+```powershell
+python -m src.predict_cli --bundle-dir models/candidates/m3_sensor20 --export-demo-input data/processed/sensor20_demo.csv --trusted-local-bundle
+python -m src.predict_cli --bundle-dir models/candidates/m3_sensor20 --input data/processed/sensor20_demo.csv --output logs/sensor20_demo_predictions.csv --trusted-local-bundle
+```
+
+데모는 **Train 유래 검증 센서 값 최대 33행**의 복사본입니다. 신규 성능 평가·미사용 Test로 보고하지 마세요. `/models/candidates/`와 CSV 파일은 Git에서 제외하며 버전이 다른 환경에서는 묶음 복원을 거부합니다.
+
+```powershell
+python -m unittest tests.test_predict_cli tests.test_sensor_bundle tests.test_check_sensor_inference tests.test_sensor_inference -v
+```
+
 ## 프로젝트 디렉터리 구조
 
 ```text
@@ -384,6 +436,17 @@ secom-waferguard/
 │   ├── step6_feature_compare.py # PCA·L1·Top-K 특징 선택 비교
 │   ├── step7_time_validation.py # 사전 선택 후보의 시간 구간 검증
 │   ├── step8_threshold_oof.py # OOF threshold 비교
+│   ├── top20_oof_compare.py # S0 + M3·M0 단일 OOF·Recall별 선별 부담 비교
+│   ├── top20_time_validation.py # 기존 S0·M3 OOF 문턱을 고정한 시간순 Validation
+│   ├── score_diagnostics.py # 정상·불량별 확률 분포와 선택 센서 교집합 진단
+│   ├── selected_sensor_drift.py # 저장된 선택 센서의 결측률·값 분포·월별 평균 진단
+│   ├── sensor_detail.py # 지정 센서의 원본 누적분포·월별 상세 그래프와 요약
+│   ├── recent_window_compare.py # Train 내부 전체 과거·최근 기간 학습의 시간순 비교
+│   ├── sensor_inference.py # 선택 수치형 센서만 사용하는 예측 전용 코어
+│   ├── check_sensor_inference.py # 전체·축소 입력 정합성 확인·후보 저장
+│   ├── sensor_bundle.py # 후보 묶음 저장·별도 프로세스 복원 확인
+│   ├── predict_cli.py # 고정 센서 CSV 예측·데모 입력 내보내기
+│   ├── evaluate_frozen_model.py # 동결 모델의 후속 시간 구간 1회 평가 (재학습 없음)
 │   ├── run_evaluation.py     # 변경 범위별 OOF·시간 검증 실행 관리
 │   ├── temporal_validation.py # Train 내부 시간순 검증·OOF 전이 비교
 │   ├── anomaly_compare.py    # 정상 전용 Isolation Forest·PCA 복원오차 시간순 비교

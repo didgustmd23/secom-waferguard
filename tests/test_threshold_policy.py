@@ -8,11 +8,24 @@ from dataclasses import replace
 
 import pandas as pd
 
-from src.modeling_config import ThresholdPolicy
+from src.modeling_config import ThresholdPolicy, MODELING_CONFIG
 from src.threshold_policy import policy_candidates, select_policy_threshold
 
 
 class ThresholdPolicyTest(unittest.TestCase):
+    def test_current_policy_accepts_eighty_forty_scenario(self):
+        # 작은 후보 표로 설정 변경을 검증하며 기존 실험 로그를 수정하지 않는다.
+        table = pd.DataFrame({"threshold": [0.01, 0.03, 0.08],
+                              "recall": [71 / 78, 63 / 78, 44 / 78],
+                              "support": [1096] * 3, "positive_support": [78] * 3,
+                              "true_positive": [71, 63, 44], "false_positive": [595, 344, 174]})
+        policy = MODELING_CONFIG.threshold_policy
+        self.assertEqual(policy.min_recall, 0.8)
+        self.assertEqual(policy.max_reinspection_ratio, 0.4)
+        candidates = policy_candidates(table, policy)
+        self.assertEqual(candidates.policy_feasible.tolist(), [False, True, False])
+        self.assertEqual(select_policy_threshold(table, policy), 0.03)
+
     def setUp(self):
         # 동일한 100건 중 불량 10건에 대해 계산한 후보 표를 사용한다.
         self.table = pd.DataFrame({"threshold": [0.1, 0.2, 0.3, 0.4],

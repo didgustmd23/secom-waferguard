@@ -1,8 +1,8 @@
 {
   "dataset_profile": "configs/datasets/secom.json",
   "threshold_policy": {
-    "min_recall": 0.9,
-    "max_reinspection_ratio": 0.2,
+    "min_recall": 0.8,
+    "max_reinspection_ratio": 0.4,
     "selection_rule": "min_reinspection",
     "on_infeasible": "report_only"
   },
@@ -27,6 +27,17 @@
     ]
   },
   "feature_selection": {
+    "reduction_policy": {
+      "max_sensor_count": 20,
+      "target_ap_loss_ratio": 0.2,
+      "max_ap_loss_ratio": 0.3,
+      "comparison_pairs": [
+        ["xgboost_all", "xgboost_top_20"],
+        ["xgboost_all", "xgboost_rf_top_20"],
+        ["lightgbm_all", "lightgbm_top_20"],
+        ["lightgbm_all", "lightgbm_rf_top_20"]
+      ]
+    },
     "top_k_feature_counts": [
       100,
       50,

@@ -10,6 +10,7 @@ from __future__ import annotations
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -24,6 +25,43 @@ from src.modeling_models import build_pipeline, fit_pipeline
 
 
 class FeatureComparisonTest(unittest.TestCase):
+    # ==========================================
+    # 작은 합성 데이터로 CV의 M1~M3 옵션 전달을 검증
+    # - 실제 SECOM 실험 대신 Top-2·트리 3개로 연결만 확인
+    # - 전체 기준 깊이 3, 축소 분류기 깊이 2, 선택 RF는 깊이 제한 없음
+    # ==========================================
+    def test_m1_cv_keeps_baseline_and_selector(self):
+        templates = {}
+
+        def small_pipeline(config, name, *, n_jobs=1):
+            model = build_pipeline(config, name, n_jobs=n_jobs)
+            model.set_params(**{key: 3 for key in model.get_params()
+                                if key.endswith("__n_estimators")})
+            templates[name] = model
+            return model
+
+        # M1·M2·M3을 같은 작은 데이터에서 각각 독립적으로 검증한다.
+        for depth, reg_lambda in ((2, None), (None, 5), (2, 5)):
+            with self.subTest(depth=depth, reg_lambda=reg_lambda):
+                with patch("src.step6_feature_compare.build_pipeline", side_effect=small_pipeline):
+                    result = compare_features(self._frame(), self.config,
+                                              experiment_names=("xgboost_all", "xgboost_rf_top_2"),
+                                              topk_xgb_max_depth=depth, topk_xgb_reg_lambda=reg_lambda)
+                self.assertEqual(templates["xgboost_all"].named_steps["model"].max_depth, 3)
+                self.assertEqual(templates["xgboost_all"].named_steps["model"].reg_lambda, 1)
+                top = templates["xgboost_rf_top_2"]
+                self.assertEqual(top.named_steps["model"].max_depth, 3 if depth is None else depth)
+                self.assertEqual(top.named_steps["model"].reg_lambda, 1 if reg_lambda is None else reg_lambda)
+                self.assertIsNone(top.named_steps["selector"].estimator.max_depth)
+                self.assertEqual(top.named_steps["selector"].estimator.min_samples_leaf, 1)
+        self.assertEqual(templates["xgboost_all"].named_steps["model"].max_depth, 3)
+        top = templates["xgboost_rf_top_2"]
+        self.assertEqual(top.named_steps["model"].max_depth, 2)
+        self.assertIsNone(top.named_steps["selector"].estimator.max_depth)
+        self.assertEqual(top.named_steps["selector"].estimator.min_samples_leaf, 1)
+        self.assertEqual(len(result.attrs["fold_results"]), 4)
+        self.assertTrue(result.attrs["selected_features"].groupby("cv_fold").size().eq(2).all())
+
     dataset = DatasetSpec(
         dataset_id="toy_feature_compare",
         input_path=Path("unused.csv"),
