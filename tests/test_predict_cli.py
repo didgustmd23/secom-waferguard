@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.predict_cli import predict_sensor_file, read_sensor_csv, write_new_csv
+from src.inference.predict_cli import predict_sensor_file, read_sensor_csv, write_new_csv
 
 
 class PredictCliTest(unittest.TestCase):
@@ -37,7 +37,7 @@ class PredictCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             source, target = Path(temporary) / "input.csv", Path(temporary) / "predictions.csv"
             write_new_csv(pd.DataFrame({"a": [8, 2], "b": [1, 3]}), source)
-            with patch("src.predict_cli.load_sensor_bundle",
+            with patch("src.inference.predict_cli.load_sensor_bundle",
                        return_value={"inference": SyntheticInference()}) as load:
                 result = predict_sensor_file("bundle", source, target, trusted=True)
             load.assert_called_once_with("bundle", trusted=True)
@@ -56,7 +56,7 @@ class PredictCliTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "코드 실행 위험"):
                 predict_sensor_file("not-read", source, target, trusted=False)
             self.assertFalse(target.exists())
-            with patch("src.predict_cli.load_sensor_bundle") as load:
+            with patch("src.inference.predict_cli.load_sensor_bundle") as load:
                 load.return_value["inference"].predict.side_effect = ValueError("센서 계약 오류")
                 with self.assertRaisesRegex(ValueError, "센서 계약 오류"):
                     predict_sensor_file("bundle", source, target, trusted=True)

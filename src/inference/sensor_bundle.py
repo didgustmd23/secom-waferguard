@@ -33,7 +33,7 @@ def save_sensor_bundle(inference, features, output_dir, *, provenance):
         raise ValueError("저장할 객체는 SensorInference여야 합니다.")
     # 모듈 실행 경로를 고정하여 별도 프로세스의 역직렬화에서 클래스를 찾게 한다.
     if inference.__class__.__module__ != "src.sensor_inference":
-        raise ValueError("저장 기능은 python -m src.check_sensor_inference로 실행하세요.")
+        raise ValueError("저장 기능은 python -m src.verification.check_sensor_inference로 실행하세요.")
     directory = Path(output_dir)
     if directory.exists() and any(directory.iterdir()):
         raise ValueError("모델 묶음 폴더가 비어 있지 않습니다. 새 폴더를 지정하세요.")

@@ -14,7 +14,7 @@ from typing import Callable
 
 import pandas as pd
 
-# Script 직접 실행과 `src.step1_merge_data` 모듈 import를 모두 지원한다.
+# 프로젝트 루트에서 모듈 실행 또는 import하여 공통 코어를 불러온다.
 try:
     from src.dataset_schema import validate_dataset_frame
     from src.modeling_config import (

@@ -97,13 +97,13 @@ Model freeze → Final test (once) → Model bundle
   3. **Time-based split:** timestamp를 Dataset Profile의 형식으로 파싱한 뒤 시간 오름차순으로 정렬한다. 과거 70%를 Train, 중간 15%를 Validation, 최근 15%를 Test로 사용하는 것을 목표로 하며 shuffle·stratify는 적용하지 않는다. 같은 timestamp·선언된 그룹·복합 ID는 경계를 넘겨 분리하지 않는다. 따라서 실제 비율은 달라질 수 있으며, 안전한 경계가 없거나 timestamp 파싱이 실패하면 중단한다.
   4. **Leakage 방지:** 동일한 생성 계약의 Train·Validation·Test만 사용하며 원본 행 ID와 split 역할을 검증한다. `label`, `timestamp`, Profile의 ID·그룹·제외 컬럼과 예약 split metadata는 모델 입력에서 제외한다. 수치형 median 대치·범주형 최빈값 대치/One-Hot Encoding·scaling·특징 선택은 Train/CV 학습 fold에서만 fit한다. Time Validation은 Train 이후 시간 범위인지도 검사한다.
   5. **Test set 봉인:** 후보 모델 비교, 특징 선택, threshold 결정에는 Test를 사용하지 않는다. 최종 모델과 threshold가 확정된 뒤에만 Test 성능을 한 번 평가한다.
-  6. **산출물 및 점검 기록:** 팀원의 `src/step3_split.py`를 공식 진입점으로 유지한다. 기존 분할·EDA·요약·누수 검사 함수에 Profile 검증·그룹 경계·원본 행 ID·저장 전 검사를 통합한다. 기본 출력은 `data/splits/integrated/`의 여섯 split 및 `manifest.json`, `logs/step3_integrated/`의 요약·누수·시간 경계 점검이다. 각 CSV에는 `__source_row_id`, `__split_role`, `__split_protocol_id`를 보존한다. 기존 split 파일은 덮어쓰지 않고 검사 실패 시 저장을 중단한다. 그림은 `reports/figures/step3/`에 저장한다. 별도 `step3_split_data.py`는 중복 구현을 피하기 위해 제거한다.
+  6. **산출물 및 점검 기록:** 팀원의 `src/data_pipeline/step3_split.py`를 공식 진입점으로 유지한다. 기존 분할·EDA·요약·누수 검사 함수에 Profile 검증·그룹 경계·원본 행 ID·저장 전 검사를 통합한다. 기본 출력은 `data/splits/integrated/`의 여섯 split 및 `manifest.json`, `logs/step3_integrated/`의 요약·누수·시간 경계 점검이다. 각 CSV에는 `__source_row_id`, `__split_role`, `__split_protocol_id`를 보존한다. 기존 split 파일은 덮어쓰지 않고 검사 실패 시 저장을 중단한다. 그림은 `reports/figures/step3/`에 저장한다. 별도 `step3_split_data.py`는 중복 구현을 피하기 위해 제거한다.
 
   **기존 결과 해석의 정정:** 기존 Time Validation 235행 중 163행이 Random Train에 포함돼 후보 비교·OOF 탐색에 사용됐다. 기존 시간 평가 수치를 독립적인 미사용 holdout 성능으로 주장하지 않는다. 위 교정 경로로 재실행하더라도 이미 관찰한 데이터가 다시 미사용 데이터가 되는 것은 아니며, 엄격한 최종 일반화 확인에는 별도의 미사용 데이터가 필요하다.
 
 - [x] Python 환경과 `requirements.txt` 구성 확인
 
-**예정 산출물:** `data/processed/secom_merged.csv`, `logs/dataset_log.csv`, `src/step1_merge_data.py`, `src/step2_data_check.py`
+**예정 산출물:** `data/processed/secom_merged.csv`, `logs/dataset_log.csv`, `src/data_pipeline/step1_merge_data.py`, `src/data_pipeline/step2_data_check.py`
 
 ## Day 2 — EDA, 데이터 분할, Baseline
 
@@ -130,7 +130,7 @@ Model freeze → Final test (once) → Model bundle
 
   기존 Random Train과 Time Validation 중복 이력을 확인하고 교정된 split 계약·학습 fold 내부 전처리 경로를 검토했습니다. 과거 탐색 결과가 독립 미사용 평가로 바뀌었다는 뜻은 아닙니다. Baseline 검토 근거는 보고서 12절입니다.
 
-**예정 산출물:** `data/splits/`, `logs/split_summary.csv`, `logs/baseline_result.csv`, `src/step3_split.py`, `src/step4_baseline.py`
+**예정 산출물:** `data/splits/`, `logs/split_summary.csv`, `logs/baseline_result.csv`, `src/data_pipeline/step3_split.py`, `src/experiments/step4_baseline.py`
 
 ## Day 3 — 특징 선택과 후보 모델 비교
 
@@ -211,7 +211,7 @@ Model freeze → Final test (once) → Model bundle
 - 모델·특성 집합·threshold를 모두 고정한 뒤에만 Test를 한 번 평가한다.
   - **이유:** Test set을 최종 확인용으로 보존해 성능 추정의 낙관 편향을 막는다.
 - 단일 모델 threshold 후보용 OOF는 기본 1회 K-fold로 생성한다. 후보 비교의 반복 CV 정책은 유지하며, 반복 평균 OOF는 `analysis_only`로 구분한다. Step 7의 `--threshold-report`로 동일한 Train 생성 계약·모델·단일 OOF 방식인지 확인한다. 단일 OOF도 전체 Train 재학습 모델과 확률 척도가 같다고 보장하지 않으므로 확률 보정·시간 순서 내부 검증은 후속 과제로 남긴다. 현재 성능 하락을 drift만의 결과로 단정하지 않는다.
-- 실행 범위는 `src/run_evaluation.py`의 `--change`로 관리한다. 전처리·모델·데이터·split 변경은 OOF부터 다시 생성하고, threshold 변경은 성공한 같은 실행 폴더의 OOF 비교표를 재사용해 시간 검증을 실행한다. 선행 실패 시 평가를 중단한다. 변경 유형은 호출자가 선언하며 해시로 소스 변경을 자동 감지하지 않는다.
+- 실행 범위는 `src/evaluation/run_evaluation.py`의 `--change`로 관리한다. 전처리·모델·데이터·split 변경은 OOF부터 다시 생성하고, threshold 변경은 성공한 같은 실행 폴더의 OOF 비교표를 재사용해 시간 검증을 실행한다. 선행 실패 시 평가를 중단한다. 변경 유형은 호출자가 선언하며 해시로 소스 변경을 자동 감지하지 않는다.
 
 ### 공동
 
@@ -252,7 +252,7 @@ Model freeze → Final test (once) → Model bundle
 
   V1 복원 검증과 Train 유래 33행 CLI 데모는 완료했습니다. 프로젝트 전체를 README 절차로 처음부터 재현하는 점검, V2를 포함한 최종 보고서 작성, GitHub 공개·발표 최종 점검은 아직 완료하지 않았습니다.
 
-**예정 산출물:** `logs/test_result.csv`, `models/model.joblib`, `models/model_card.json`, `src/predict_cli.py`, `reports/report.md`
+**예정 산출물:** `logs/test_result.csv`, `models/model.joblib`, `models/model_card.json`, `src/inference/predict_cli.py`, `reports/report.md`
 
 ## 완료 기준
 

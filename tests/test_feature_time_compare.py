@@ -11,7 +11,7 @@ from dataclasses import replace
 import numpy as np
 import pandas as pd
 
-from src.feature_time_compare import compare_feature_time, selection_rows, build_feature_pipelines
+from src.experiments.feature_time_compare import compare_feature_time, selection_rows, build_feature_pipelines
 from src.modeling_config import MODELING_CONFIG
 from src.split_contract import SOURCE_ROW_ID, SPLIT_ROLE, PROTOCOL_ID
 

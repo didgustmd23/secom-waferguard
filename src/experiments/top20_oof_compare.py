@@ -20,12 +20,12 @@ try:
     from src.modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
     from src.modeling_models import build_pipeline, configure_topk_xgb
     from src.modeling_preprocessing import quality_filter_json
-    from src.step8_threshold_oof import generate_oof_scores, compare_thresholds
+    from src.experiments.step8_threshold_oof import generate_oof_scores, compare_thresholds
 except ModuleNotFoundError:
     from modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
     from modeling_models import build_pipeline, configure_topk_xgb
     from modeling_preprocessing import quality_filter_json
-    from step8_threshold_oof import generate_oof_scores, compare_thresholds
+    from src.experiments.step8_threshold_oof import generate_oof_scores, compare_thresholds
 
 
 # ==========================================

@@ -12,8 +12,8 @@ import pandas as pd
 
 from src.modeling_config import MODELING_CONFIG
 from src.split_contract import SOURCE_ROW_ID, SPLIT_ROLE, PROTOCOL_ID
-from src.selected_sensor_drift import diagnose_selected_sensors, write_sensor_diagnosis
-from src.sensor_detail import validate_detail_features, write_sensor_details
+from src.diagnostics.selected_sensor_drift import diagnose_selected_sensors, write_sensor_diagnosis
+from src.diagnostics.sensor_detail import validate_detail_features, write_sensor_details
 
 
 class SelectedSensorDriftTest(unittest.TestCase):

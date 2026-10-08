@@ -85,10 +85,10 @@
 
 ## 6. 사용자 실행 명령어
 
-`src/evaluate_frozen_model.py`를 준비했다. 저장된 분류기·median·센서 목록·threshold를 그대로 사용한다. 현재 Profile은 기존 시간 검증 실행의 데이터 정의와 일치해야 하며 이를 저장 모델에 새로 적용하거나 학습하지 않는다.
+`src/evaluation/evaluate_frozen_model.py`를 준비했다. 저장된 분류기·median·센서 목록·threshold를 그대로 사용한다. 현재 Profile은 기존 시간 검증 실행의 데이터 정의와 일치해야 하며 이를 저장 모델에 새로 적용하거나 학습하지 않는다.
 
 ```powershell
-python -m src.evaluate_frozen_model --bundle-dir models/candidates/m3_sensor20 --train data/splits/integrated/time_train.csv --test data/splits/integrated/time_test.csv --reference-run logs/m3_policy80_40_time_validation/execution.json --output-dir logs/m3_frozen_time_evaluation --trusted-local-bundle --confirm-frozen-evaluation
+python -m src.evaluation.evaluate_frozen_model --bundle-dir models/candidates/m3_sensor20 --train data/splits/integrated/time_train.csv --test data/splits/integrated/time_test.csv --reference-run logs/m3_policy80_40_time_validation/execution.json --output-dir logs/m3_frozen_time_evaluation --trusted-local-bundle --confirm-frozen-evaluation
 ```
 
 - Test label·값을 읽고 평가하는 명령이다. 사용자가 평가를 실행할 때만 수행한다. 이번 코드 작성에서는 실행하지 않았다.

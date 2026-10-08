@@ -16,7 +16,7 @@ from sklearn.base import clone
 from src.modeling_config import MODELING_CONFIG
 from src.modeling_models import XGBoostClassifierAdapter
 from src.split_contract import PROTOCOL_ID, SOURCE_ROW_ID, SPLIT_ROLE
-from src.time_weight_compare import DEFAULT_PRESET, build_weight_candidates, compare_time_weights
+from src.experiments.time_weight_compare import DEFAULT_PRESET, build_weight_candidates, compare_time_weights
 
 
 class TimeWeightCompareTest(unittest.TestCase):

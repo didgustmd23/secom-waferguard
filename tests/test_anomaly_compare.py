@@ -10,7 +10,7 @@ from dataclasses import replace
 import numpy as np
 import pandas as pd
 
-from src.anomaly_compare import fit_detector, anomaly_scores, compare_anomalies
+from src.experiments.anomaly_compare import fit_detector, anomaly_scores, compare_anomalies
 from src.modeling_config import MODELING_CONFIG, ThresholdPolicy
 from src.modeling_metrics import evaluate_binary_scores, evaluate_anomaly_scores
 from src.threshold_policy import select_policy_threshold

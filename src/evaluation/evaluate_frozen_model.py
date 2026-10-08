@@ -17,8 +17,8 @@ import pandas as pd
 from src.dataset_schema import split_frame_to_xy
 from src.modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
 from src.modeling_metrics import evaluate_binary_scores
-from src.predict_cli import read_sensor_csv
-from src.sensor_bundle import load_sensor_bundle
+from src.inference.predict_cli import read_sensor_csv
+from src.inference.sensor_bundle import load_sensor_bundle
 from src.split_contract import SPLIT_METADATA, SPLIT_ROLE, PROTOCOL_ID, validate_split_pair
 
 

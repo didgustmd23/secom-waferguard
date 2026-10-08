@@ -37,7 +37,7 @@ try:
     from src.dataset_schema import split_frame_to_xy
     from src.modeling_models import build_classifier, build_pipeline, fit_pipeline, XGBoostClassifierAdapter, configure_rf_selectors, configure_topk_xgb
     from src.modeling_preprocessing import checked_top_k
-    from src.temporal_validation import compare_temporal
+    from src.experiments.temporal_validation import compare_temporal
     from src.split_contract import PROTOCOL_ID
 except ModuleNotFoundError:
     from feature_reduction import assess_reduction
@@ -46,7 +46,7 @@ except ModuleNotFoundError:
     from dataset_schema import split_frame_to_xy
     from modeling_models import build_classifier, build_pipeline, fit_pipeline, XGBoostClassifierAdapter, configure_rf_selectors, configure_topk_xgb
     from modeling_preprocessing import checked_top_k
-    from temporal_validation import compare_temporal
+    from src.experiments.temporal_validation import compare_temporal
     from split_contract import PROTOCOL_ID
 
 

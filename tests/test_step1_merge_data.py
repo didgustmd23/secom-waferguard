@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 from src.modeling_config import DatasetSpec, IngestionSourceSpec, IngestionSpec
-from src.step1_merge_data import merge_feature_metadata_pair
+from src.data_pipeline.step1_merge_data import merge_feature_metadata_pair
 
 
 class Step1MergeDataTest(unittest.TestCase):

@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 from src.modeling_config import load_modeling_config
-from src.step8_threshold_oof import compare_thresholds, validate_threshold_report
+from src.experiments.step8_threshold_oof import compare_thresholds, validate_threshold_report
 from src.split_contract import PROTOCOL_ID
 
 

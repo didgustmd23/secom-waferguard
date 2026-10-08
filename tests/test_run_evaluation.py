@@ -14,7 +14,7 @@ from dataclasses import replace
 
 import pandas as pd
 
-from src import run_evaluation as runner
+from src.evaluation import run_evaluation as runner
 from src.modeling_config import MODELING_CONFIG
 
 

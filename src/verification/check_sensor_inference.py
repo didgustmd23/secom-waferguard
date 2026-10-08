@@ -19,13 +19,13 @@ try:
     from src.modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
     from src.modeling_models import fit_pipeline
     from src.sensor_inference import build_sensor_inference
-    from src.top20_time_validation import prepare_candidate
+    from src.experiments.top20_time_validation import prepare_candidate
 except ModuleNotFoundError:
     from dataset_schema import split_frame_to_xy
     from modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
     from modeling_models import fit_pipeline
     from sensor_inference import build_sensor_inference
-    from top20_time_validation import prepare_candidate
+    from src.experiments.top20_time_validation import prepare_candidate
 
 
 def compare_prediction_paths(pipeline, inference, full, *, case, atol=1e-12):
@@ -107,7 +107,7 @@ def parse_args(argv=None):
     args = parser.parse_args(argv)
     if args.bundle_dir is not None:
         if __package__ != "src":
-            raise ValueError("후보 저장은 python -m src.check_sensor_inference로 실행하세요.")
+            raise ValueError("후보 저장은 python -m src.verification.check_sensor_inference로 실행하세요.")
         if args.bundle_dir.exists() and any(args.bundle_dir.iterdir()):
             raise ValueError("모델 묶음 폴더가 비어 있지 않습니다. 새 폴더를 지정하세요.")
         if args.bundle_dir.resolve() == args.output_dir.resolve():
@@ -172,7 +172,7 @@ def main():
     if summary["status"] != "passed":
         raise ValueError("추론 경로 정합성 확인에 실패했습니다. 최종 모델 준비 전에 차이를 확인하세요.")
     if args.bundle_dir is not None:
-        from src.sensor_bundle import save_sensor_bundle
+        from src.inference.sensor_bundle import save_sensor_bundle
         # 방금 비교에 사용한 동일 학습 모델에서 추론 객체를 가져오며 다시 fit하지 않는다.
         inference = build_sensor_inference(fitted, positive_label=config.dataset.positive_label,
                                             threshold=args.threshold,

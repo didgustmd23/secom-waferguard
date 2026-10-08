@@ -11,10 +11,10 @@ import numpy as np
 import pandas as pd
 from sklearn.base import clone
 
-from src.feature_time_compare import build_feature_pipelines, compare_feature_time
+from src.experiments.feature_time_compare import build_feature_pipelines, compare_feature_time
 from src.modeling_config import MODELING_CONFIG
 from src.modeling_models import build_pipeline
-from src.step6_feature_compare import compare_features
+from src.experiments.step6_feature_compare import compare_features
 from src.split_contract import SOURCE_ROW_ID, SPLIT_ROLE, PROTOCOL_ID
 
 
@@ -75,7 +75,7 @@ class StableRFTest(unittest.TestCase):
             return pipeline
         config = replace(MODELING_CONFIG, experiment=replace(MODELING_CONFIG.experiment,
                          cv=replace(MODELING_CONFIG.experiment.cv, n_splits=2, n_repeats=1)))
-        with patch("src.step6_feature_compare.build_pipeline", side_effect=small_pipeline):
+        with patch("src.experiments.step6_feature_compare.build_pipeline", side_effect=small_pipeline):
             cv = compare_features(self.frame(), config, experiment_names=names, rf_stability_repeats=2)
         self.assertEqual(len(cv.attrs["bootstrap_records"]), 4)
         self.assertIn("bootstrap_mean_rank", cv.attrs["selected_features"].columns)

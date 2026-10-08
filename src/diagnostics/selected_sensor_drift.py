@@ -17,8 +17,8 @@ import pandas as pd
 try:
     from src.modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
     from src.split_contract import PROTOCOL_ID, validate_split_pair
-    from src.step3_drift_check import build_temporal_drift_report
-    from src.sensor_detail import validate_detail_features, write_sensor_details
+    from src.diagnostics.step3_drift_check import build_temporal_drift_report
+    from src.diagnostics.sensor_detail import validate_detail_features, write_sensor_details
 except ModuleNotFoundError:
     from modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
     from split_contract import PROTOCOL_ID, validate_split_pair

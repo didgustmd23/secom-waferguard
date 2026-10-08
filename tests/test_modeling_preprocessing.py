@@ -17,9 +17,9 @@ import pandas as pd
 
 from src.modeling_config import CrossValidationConfig, MODELING_CONFIG
 from src.modeling_preprocessing import fitted_feature_count
-from src.step5_model_compare import build_candidate_pipelines, compare_candidates
-from src.step6_feature_compare import build_experiments, compare_features
-from src.step8_threshold_oof import generate_oof_scores, run_threshold_oof_from_file
+from src.experiments.step5_model_compare import build_candidate_pipelines, compare_candidates
+from src.experiments.step6_feature_compare import build_experiments, compare_features
+from src.experiments.step8_threshold_oof import generate_oof_scores, run_threshold_oof_from_file
 from src.split_contract import SOURCE_ROW_ID, SPLIT_ROLE, PROTOCOL_ID
 
 
@@ -115,7 +115,7 @@ class GenericPreprocessingTest(unittest.TestCase):
             root = Path(directory)
             train_path = root / "train.csv"
             self._frame().assign(sensor_c=np.nan).to_csv(train_path, index=False)
-            with patch("src.step8_threshold_oof.load_modeling_config", return_value=self.config):
+            with patch("src.experiments.step8_threshold_oof.load_modeling_config", return_value=self.config):
                 run_threshold_oof_from_file(root / "config.json", train_path,
                                             root / "oof.csv", root / "threshold.csv")
             written = pd.read_csv(root / "oof_quality_filter.csv")

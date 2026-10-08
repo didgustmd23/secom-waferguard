@@ -16,9 +16,9 @@ import pandas as pd
 from src.modeling_config import DEFAULT_CONFIG_PATH, load_modeling_config
 from src.modeling_models import build_pipeline
 from src.split_contract import PROTOCOL_ID, validate_train_role
-from src.temporal_validation import compare_temporal
+from src.experiments.temporal_validation import compare_temporal
 
-DEFAULT_PRESET = Path(__file__).resolve().parents[1] / "configs/experiments/time_weight_v2.json"
+DEFAULT_PRESET = Path(__file__).resolve().parents[2] / "configs/experiments/time_weight_v2.json"
 
 
 def build_weight_candidates(config, preset, *, n_jobs=1):
