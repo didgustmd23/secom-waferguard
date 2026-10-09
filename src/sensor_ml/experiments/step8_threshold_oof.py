@@ -71,6 +71,10 @@ def generate_oof_scores(
 
     # 외부에서 준비한 M0·M3도 같은 OOF 코어를 사용한다.
     # fit_pipeline이 매 fold마다 clone하므로 전달한 객체의 학습 상태는 재사용하지 않는다.
+    if experiment_name == "xgboost_lightgbm_gain_top20" and pipeline_template is None:
+        # 팀원 제안은 명시적으로 선택할 때만 사용한다. 외부 센서 JSON은 읽지 않는다.
+        from src.sensor_ml.experiments.lightgbm_gain_candidate import build_gain_candidate
+        pipeline_template = build_gain_candidate(config, n_jobs=n_jobs)
     experiment_pipeline = (build_pipeline(config, experiment_name, n_jobs=n_jobs)
                            if pipeline_template is None else pipeline_template)
 
@@ -237,6 +241,12 @@ def run_threshold_oof_from_file(
     quality_path = Path(oof_output_path).with_name(Path(oof_output_path).stem + "_quality_filter.csv")
     quality_log.to_csv(quality_path, index=False, encoding="utf-8-sig")
 
+    # fold별 목록은 전체 Train에서 고정한 센서 목록과 구분해 보존한다.
+    selected = pd.DataFrame(oof_frame.attrs["selected_features"], columns=["cv_fold", "feature"])
+    if not selected.empty:
+        selected.to_csv(Path(oof_output_path).with_name(Path(oof_output_path).stem + "_selected_features.csv"),
+                        index=False, encoding="utf-8-sig")
+
     return oof_frame, threshold_frame, elapsed_seconds
 
 
@@ -252,7 +262,7 @@ def _parse_arguments() -> argparse.Namespace:
     parser.add_argument("--score-method", choices=("single", "repeated_mean"), default="single",
                         help="single은 threshold 후보용, repeated_mean은 반복 평균 분석용입니다.")
     parser.add_argument("--experiment", choices=("lightgbm_all", "xgboost",
-                                                    "xgboost_scale_pos_weight"),
+                                                    "xgboost_scale_pos_weight", "xgboost_lightgbm_gain_top20"),
                         default=EXPERIMENT_NAME,
                         help="OOF threshold를 생성할 사전 선택 후보입니다.")
     return parser.parse_args()
@@ -282,6 +292,10 @@ def main() -> None:
         ]
     ).drop_duplicates(subset=["threshold"]).sort_values("threshold")
     print(console_summary.to_string(index=False))
+    # 기존 요약을 없애지 않고 팀원 제안의 Recall별 정밀도 비교를 추가한다.
+    from src.sensor_ml.experiments.lightgbm_gain_candidate import recall_scenarios
+    print("\nRecall 목표별 정밀도 비교 — 최종 문턱 확정 아님")
+    print(recall_scenarios(threshold_frame).to_string(index=False))
     print(f"OOF 생성 시간(초): {elapsed_seconds:.3f}")
     print(f"OOF 저장 경로: {arguments.oof_output}")
     print(f"Threshold 비교 저장 경로: {arguments.threshold_output}")

@@ -138,7 +138,8 @@ def evaluate_model(
 
     y_prob = model.predict_proba(X_valid)[:, 1]
 
-    y_pred = (y_prob >= 0.5).astype(int)
+    # 팀원 수정 반영: 0/1 인덱스가 아니라 실제 학습 클래스 label로 복원한다.
+    y_pred = model.classes_[(y_prob >= 0.5).astype(int)]
 
     return {
         "AP": average_precision_score(y_valid, y_prob),
