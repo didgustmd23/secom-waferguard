@@ -164,3 +164,35 @@ python -m src.sensor_ml.diagnostics.sensor_importance --train data/splits/integr
 수치형 median의 센서별 독립성은 PCA·범주형 인코딩·센서 간 파생 연산으로 자동 확장되지 않는다. 선택기를 추론에서 제외해도 현재 모듈의 LightGBM import 등 라이브러리 의존성이 사라지는 것은 아니다. 저장 환경은 manifest를 따른다. Agent·외부 LLM API는 코어 학습·추론의 필수 의존성이 아니다.
 
 저장 전후 확률·판정 일치는 구현 검증이고 일반화 성능이 아니다. 개발 구간, OOF, Train 유래 데모, 독립 Test의 수치를 서로 대체하지 않는다. WM-811K 확장 설계는 [별도 문서](../../WM811K_BASIC_DESIGN.md)에 유지한다.
+
+## 9. 팀원 LightGBM gain 후보 비교 — 2026-10-09
+
+상세 수치는 [보고서 36절](report.md#36-팀원-lightgbm-gain-top-20-제안-비교--2026-10-09)에 기록한다. 기존 Logistic Regression 분석과 OOF 기본값은 보존하고 팀원 제안을 별도 후보로 추가했다. -1/1 label에 맞게 정상/불량 건수로 가중치를 계산하며, 전체 Train의 센서 JSON을 OOF에 자동 적용하지 않고 각 학습 fold 내부에서 품질 필터·대치·gain 선택을 수행한다.
+
+| 단계 | 조건 | 주요 결과 | 근거 경로 |
+| --- | --- | --- | --- |
+| 첫 OOF 탐색 | Time Train 1,096행·불량 78행, 단일 무작위 계층 OOF, 최종 깊이 3 | AP 0.166773, ROC-AUC 0.693277 | `logs/secom/exploratory/team_lgbm_gain/` |
+| 시간순 대조 | 외부 3구간·내부 시간순 OOF 2구간, 두 Top-20 최종 깊이 2·규제 1·비율 가중치 | 기존 AP 0.171439, 팀원 AP 0.123767 | `logs/secom/exploratory/team_gain_time_compare/` |
+| 동일 Recall 목표 | 위 로그만 재사용, OOF 목표 이상에서 선별 비율 최소 후보 선택 | 기존 V2가 80%·90% 모두 검출 건수는 많고 정상 오탐은 적음 | `logs/secom/exploratory/team_gain_recall_compare/` |
+
+80% 목표에서 기존 V2는 TP 35·FP 604·FN 4, 팀원은 TP 33·FP 644·FN 6이었다. 90% 목표에서는 기존 TP 37·FP 723·FN 2, 팀원 TP 36·FP 738·FN 3이었다. 모두 같은 시간순 평가 824행·불량 39행의 합산 결과다. 기존 V2 주후보와 저장 묶음은 변경하지 않고 팀원 방식을 비교 실험으로 보존한다.
+
+랜덤 OOF의 정밀도 최대 후보와 시간순 재분석의 최소 선별 후보는 선택 기준이 다르다. 시간순 `summary.csv`의 F1 문턱 진단과 Recall 목표별 비교도 구분한다. 각 구간에서 센서를 재선택하므로 고정 센서 모델의 Test 결과와 동일하지 않다. 팀원 후보는 Test에서 평가하지 않았다.
+
+설정은 `configs/experiments/team_gain_time_compare.json`에 관리한다. 선택 LightGBM은 gain·200 trees·학습 fold 비율 가중치, 기존 반복 gain은 5회이며 최종 분류기는 300 trees다. 정확한 실행 파라미터는 `candidate_settings.json`, 구간·설정은 `temporal_run.json`, 문턱은 각 원본 CSV를 따른다.
+
+재현 시 기존 결과 폴더를 덮어쓰지 않는다. 아래 첫 두 명령은 학습을 포함하며 마지막 명령은 로그 재분석만 수행한다.
+
+```powershell
+python -m src.sensor_ml.experiments.step8_threshold_oof --train data/splits/integrated/time_train.csv --experiment xgboost_lightgbm_gain_top20 --oof-output logs/reproduce_team_gain_oof/oof_predictions.csv --threshold-output logs/reproduce_team_gain_oof/threshold_compare.csv --n-jobs 2
+
+python -m src.sensor_ml.experiments.team_gain_time_compare --train data/splits/integrated/time_train.csv --output-dir logs/reproduce_team_gain_time --n-jobs 2
+
+python -m src.sensor_ml.experiments.team_gain_recall_compare --source-dir logs/reproduce_team_gain_time --output-dir logs/reproduce_team_gain_recall
+```
+
+## 10. 저장 V2의 기존 Test 후속 비교 — 2026-10-09
+
+V1과 동일한 Test 236행·불량 9행에서 저장 V2를 재학습 없이 평가했다. V1 Recall 11.11%(TP 1·FP 30·FN 8)에 대해 V2 90% 목표는 Recall 100%(TP 9·FP 215·FN 0), V2 80% 목표는 Recall 66.67%(TP 6·FP 103·FN 3)였다. V2 AP는 0.075077, ROC-AUC는 0.682330이다. 개발 구간의 88.89%와 구분하며 과거 결과를 참고한 기존 Test 비교이지 완전 미사용 독립 평가가 아니다.
+
+상세 조건은 [보고서 35.5절](report.md#355-저장-v2의-기존-v1-test-구간-비교--2026-10-09), 원본은 `logs/secom/v2/v2_recall90_existing_test/`, `logs/secom/v2/v2_recall80_existing_test/`에 보존한다. 이미 완료한 평가를 문서 작성을 위해 다시 실행하지 않았다.

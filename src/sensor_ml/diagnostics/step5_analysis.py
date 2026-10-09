@@ -397,6 +397,34 @@ print(
 # Top 20 Feature Importance 그래프
 # ------------------------------------------------------------
 
+# ==========================================
+# 팀원 제안의 LightGBM gain 중요도 추가 분석
+# - 기존 Logistic Regression 분석은 삭제하거나 덮어쓰지 않음
+# - 품질 필터·대치는 Train에서만 학습
+# - 이 목록은 EDA용이며 Step 8 OOF의 입력으로 자동 사용하지 않음
+# ==========================================
+import json
+from src.sensor_ml.experiments.lightgbm_gain_candidate import FoldGainImportance
+from src.modeling_preprocessing import preprocessing_steps
+
+gain_pipeline = Pipeline(preprocessing_steps(config.dataset, pandas_output=True) + [
+    ("importance", FoldGainImportance(
+        positive_label=config.dataset.positive_label, negative_label=config.dataset.negative_label,
+        random_state=config.experiment.cv.random_state,
+    )),
+])
+gain_pipeline.fit(X_train, y_train)
+gain_names = gain_pipeline[:-1].get_feature_names_out()
+gain_table = pd.DataFrame({"feature": gain_names,
+                           "importance": gain_pipeline.named_steps["importance"].feature_importances_})
+gain_table = gain_table.sort_values("importance", ascending=False, kind="stable").reset_index(drop=True)
+gain_table.to_csv(LOG_DIR / "lightgbm_gain_importance.csv", index=False, encoding="utf-8-sig")
+with (LOG_DIR / "lightgbm_gain_top20_analysis.json").open("w", encoding="utf-8") as stream:
+    json.dump({"purpose": "analysis_only_not_oof_input", "selection_scope": "train_only",
+               "features": gain_table.feature.head(20).tolist()}, stream, ensure_ascii=False, indent=2)
+print("\nLightGBM gain 상위 20개 — 분석용, OOF 목록으로 재사용하지 않음")
+print(gain_table.head(20).to_string(index=False))
+
 top_n = 20
 
 top_features = (
