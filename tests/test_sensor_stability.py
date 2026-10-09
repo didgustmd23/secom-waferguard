@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.diagnostics.sensor_stability import compare_stability, save_results, summarize_stability
+from src.sensor_ml.diagnostics.sensor_stability import compare_stability, save_results, summarize_stability
 
 
 class SensorStabilityTest(unittest.TestCase):
@@ -45,9 +45,9 @@ class SensorStabilityTest(unittest.TestCase):
         table = pd.DataFrame({"feature": ["a", "b", "c"],
                               "status": ["used", "used", "removed_constant"],
                               "importance_rank": pd.array([1, 1, None], dtype="Int64")})
-        with patch("src.diagnostics.sensor_stability.validate_train_role"), patch(
-            "src.diagnostics.sensor_stability.temporal_folds", return_value=[([0, 1], [2, 3]), ([0, 1, 2, 3], [4, 5])]
-        ), patch("src.diagnostics.sensor_stability.fit_importance_candidate", return_value=(table, None)) as fit:
+        with patch("src.sensor_ml.diagnostics.sensor_stability.validate_train_role"), patch(
+            "src.sensor_ml.diagnostics.sensor_stability.temporal_folds", return_value=[([0, 1], [2, 3]), ([0, 1, 2, 3], [4, 5])]
+        ), patch("src.sensor_ml.diagnostics.sensor_stability.fit_importance_candidate", return_value=(table, None)) as fit:
             result = compare_stability(frame, config, preset, "toy", top_k=1)
         self.assertEqual(fit.call_args_list[0].args[0].index.tolist(), [0, 1])
         self.assertEqual(fit.call_args_list[1].args[0].index.tolist(), [0, 1, 2, 3])

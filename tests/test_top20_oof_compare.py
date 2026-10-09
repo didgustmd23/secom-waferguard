@@ -14,7 +14,7 @@ import pandas as pd
 from src.modeling_config import MODELING_CONFIG
 from src.modeling_models import build_pipeline
 from src.split_contract import SOURCE_ROW_ID, SPLIT_ROLE, PROTOCOL_ID
-from src.experiments.top20_oof_compare import compare_top20_oof, scenario_rows
+from src.sensor_ml.experiments.top20_oof_compare import compare_top20_oof, scenario_rows
 
 
 class Top20OOFTest(unittest.TestCase):
@@ -45,7 +45,7 @@ class Top20OOFTest(unittest.TestCase):
             pipeline.set_params(model__n_estimators=3, selector__estimator__n_estimators=3)
             return pipeline
 
-        with patch("src.experiments.top20_oof_compare.build_pipeline", side_effect=small_pipeline):
+        with patch("src.sensor_ml.experiments.top20_oof_compare.build_pipeline", side_effect=small_pipeline):
             tables, records = compare_top20_oof(self.frame(), config)
         oof = tables["oof_predictions"]
         self.assertEqual(len(oof), 80)

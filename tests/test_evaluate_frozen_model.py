@@ -17,8 +17,8 @@ import pandas as pd
 
 from src.modeling_config import MODELING_CONFIG
 from src.split_contract import SOURCE_ROW_ID, SPLIT_ROLE, PROTOCOL_ID
-from src.evaluation.evaluate_frozen_model import validate_final_pair, evaluate_saved_predictions, reserve_evaluation
-from src.evaluation.evaluate_frozen_model import validate_frozen_context, save_evaluation_results, main
+from src.sensor_ml.evaluation.evaluate_frozen_model import validate_final_pair, evaluate_saved_predictions, reserve_evaluation
+from src.sensor_ml.evaluation.evaluate_frozen_model import validate_frozen_context, save_evaluation_results, main
 
 
 class FrozenEvaluationTest(unittest.TestCase):
@@ -94,12 +94,12 @@ class FrozenEvaluationTest(unittest.TestCase):
 
     def test_input_failure_precedes_reservation(self):
         """입력 검증에서 실패하면 실행 표식·평가·저장에 진입하지 않는다."""
-        with patch("src.evaluation.evaluate_frozen_model.parse_args"), \
-                patch("src.evaluation.evaluate_frozen_model.load_evaluation_context", return_value=(Mock(), {}, {}, MODELING_CONFIG)), \
-                patch("src.evaluation.evaluate_frozen_model.prepare_evaluation_input", side_effect=ValueError("입력 오류")), \
-                patch("src.evaluation.evaluate_frozen_model.reserve_evaluation") as reserve, \
-                patch("src.evaluation.evaluate_frozen_model.evaluate_saved_predictions") as evaluate, \
-                patch("src.evaluation.evaluate_frozen_model.save_evaluation_results") as save:
+        with patch("src.sensor_ml.evaluation.evaluate_frozen_model.parse_args"), \
+                patch("src.sensor_ml.evaluation.evaluate_frozen_model.load_evaluation_context", return_value=(Mock(), {}, {}, MODELING_CONFIG)), \
+                patch("src.sensor_ml.evaluation.evaluate_frozen_model.prepare_evaluation_input", side_effect=ValueError("입력 오류")), \
+                patch("src.sensor_ml.evaluation.evaluate_frozen_model.reserve_evaluation") as reserve, \
+                patch("src.sensor_ml.evaluation.evaluate_frozen_model.evaluate_saved_predictions") as evaluate, \
+                patch("src.sensor_ml.evaluation.evaluate_frozen_model.save_evaluation_results") as save:
             with self.assertRaisesRegex(ValueError, "입력 오류"):
                 main()
             reserve.assert_not_called()

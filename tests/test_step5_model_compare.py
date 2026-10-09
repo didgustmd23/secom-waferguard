@@ -18,7 +18,7 @@ from src.modeling_config import (
     ExperimentProtocol,
     MODELING_CONFIG,
 )
-from src.experiments.step5_model_compare import compare_candidates
+from src.sensor_ml.experiments.step5_model_compare import compare_candidates
 
 
 class CandidateComparisonTest(unittest.TestCase):

@@ -136,6 +136,8 @@ EXPERIMENT_ALIASES = {
     "xgboost_all": "xgboost",
 }
 WEIGHTED_VARIANTS = {"lightgbm_scale_pos_weight", "xgboost_scale_pos_weight"}
+# 명시적으로 요청한 RF 복잡도 비교에만 사용한다. 기본 후보·RF 선택기는 유지한다.
+RF_LEAF_VARIANTS = {"random_forest_leaf3": 3, "random_forest_leaf5": 5}
 
 
 def candidate_base_name(name):
@@ -158,9 +160,13 @@ def build_classifier(config, name, *, n_jobs=1, n_estimators=300):
         )
     if name == "rbf_svm":
         return SVC(kernel="rbf", probability=True, random_state=seed)
-    if name == "random_forest":
+    if name in {"random_forest", "random_forest_balanced"} or name in RF_LEAF_VARIANTS:
         return RandomForestClassifier(
             n_estimators=n_estimators, random_state=seed, n_jobs=n_jobs,
+            # 현재 fit의 클래스 빈도로 가중치를 계산한다. 깊이·leaf 설정은 유지한다.
+            class_weight="balanced" if name.endswith("_balanced") else None,
+            # 마지막 노드에 필요한 최소 표본 수만 바꿔 작은 표본에 대한 분할을 제한한다.
+            min_samples_leaf=RF_LEAF_VARIANTS.get(name, 1),
         )
     if name in {"lightgbm", "lightgbm_scale_pos_weight"}:
         return LGBMClassifier(
@@ -216,10 +222,10 @@ def configure_rf_selectors(pipelines, *, min_samples_leaf=1, max_depth=None, sta
 
 
 # ==========================================
-# RF Top-K 뒤의 최종 XGBoost에만 실험용 깊이·정규화 적용
-# - 전체 센서 M0와 선택용 RF는 기존 설정을 그대로 보존
+# RF·gain Top-K 뒤의 최종 XGBoost에만 실험용 깊이·정규화 적용
+# - 전체 센서 M0와 센서 선택용 모델은 기존 설정을 그대로 보존
 # - 옵션 생략 시 기존 S0~S3 동작을 유지
-# - 센서 수·데이터셋에 고정하지 않고 RF Top-K 경로에 적용
+# - 센서 수·데이터셋에 고정하지 않고 XGBoost Top-K 경로에 적용
 # ==========================================
 def configure_topk_xgb(pipelines, *, max_depth=None, reg_lambda=None):
     if max_depth is None and reg_lambda is None:
@@ -237,12 +243,12 @@ def configure_topk_xgb(pipelines, *, max_depth=None, reg_lambda=None):
             raise ValueError("Top-K 최종 XGBoost의 reg_lambda는 유한한 0 이상의 숫자여야 합니다.")
         params["model__reg_lambda"] = reg_lambda
     targets = [pipeline for name, pipeline in pipelines.items()
-               if name.startswith("xgboost_rf_top_")
+               if name.startswith(("xgboost_rf_top_", "xgboost_top_"))
                and isinstance(pipeline.named_steps.get("model"), XGBoostClassifierAdapter)]
     if not targets:
-        raise ValueError("설정을 적용할 RF Top-K → XGBoost 실험이 없습니다.")
+        raise ValueError("설정을 적용할 Top-K → XGBoost 실험이 없습니다.")
     for pipeline in targets:
-        # 선택기 깊이는 건드리지 않아 S0 센서 선택을 유지한다.
+        # 선택기와 bootstrap 설정은 건드리지 않고 최종 분류기만 변경한다.
         pipeline.set_params(**params)
     return pipelines
 
@@ -284,9 +290,15 @@ def build_pipeline(config, name, *, n_jobs=1):
     return Pipeline(steps + [("model", classifier)])
 
 
-def build_candidate_pipelines(config, n_jobs=1):
-    """기존 Step 5 후보와 가중치 변형을 같은 정의로 생성한다."""
-    return {name: build_pipeline(config, name, n_jobs=n_jobs) for name in CANDIDATE_VARIANTS}
+def build_candidate_pipelines(config, n_jobs=1, *, names=None):
+    """기본 후보 또는 명시적으로 요청한 후보만 생성한다."""
+    # RF 가중치·leaf 변형은 명시적 비교에서만 사용해 기본 후보를 늘리지 않는다.
+    names = CANDIDATE_VARIANTS if names is None else tuple(names)
+    unknown = (set(names) - set(CANDIDATE_VARIANTS)
+               - {"random_forest_balanced"} - set(RF_LEAF_VARIANTS))
+    if unknown:
+        raise ValueError(f"지원하지 않는 후보 모델입니다: {sorted(unknown)}")
+    return {name: build_pipeline(config, name, n_jobs=n_jobs) for name in names}
 
 
 def build_experiments(config, n_jobs=1):

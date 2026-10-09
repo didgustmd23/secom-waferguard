@@ -12,7 +12,7 @@ from pathlib import Path
 import pandas as pd
 
 from src.modeling_config import DatasetSpec
-from src.diagnostics.step3_drift_check import (
+from src.sensor_ml.diagnostics.step3_drift_check import (
     align_split_features,
     build_label_drift_summary,
     build_temporal_drift_report,

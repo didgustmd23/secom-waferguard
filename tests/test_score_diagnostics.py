@@ -11,7 +11,7 @@ from tempfile import TemporaryDirectory
 import pandas as pd
 
 from src.modeling_config import MODELING_CONFIG
-from src.diagnostics.score_diagnostics import summarize_scores, sensor_overlap, write_score_diagnostics
+from src.sensor_ml.diagnostics.score_diagnostics import summarize_scores, sensor_overlap, write_score_diagnostics
 
 
 class ScoreDiagnosticsTest(unittest.TestCase):
