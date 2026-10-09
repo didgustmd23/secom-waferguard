@@ -193,6 +193,19 @@ python -m src.sensor_ml.experiments.team_gain_recall_compare --source-dir logs/r
 
 ## 10. 저장 V2의 기존 Test 후속 비교 — 2026-10-09
 
+### 팀원 브랜치 통합 기록
+
+`origin/su/branch`의 `1ff1134`, `5129d0b` 변경을 `feature/modeling`에서 통합한다. 메인에는 직접 반영하지 않는다. 이동 전 `src/step*.py`를 되살리지 않고 현재 `src/sensor_ml/` 경로로 충돌을 정리했다.
+
+- Step 5·8: 기존 분석과 보완된 별도 LightGBM gain 후보·Recall 비교를 유지한다. 전체 Train 센서 JSON 자동 적용, label 합계 가중치, 작은 문턱 제외는 채택하지 않는다.
+- Step 10: 예측 인덱스를 실제 학습 클래스 label로 복원하는 팀원 수정을 반영한다.
+- Step 12: Step 10이 저장한 `validation`, `AP`, `Recall`, `Precision`, `F1`, `ROC-AUC` 컬럼을 읽도록 수정한다.
+- CLI: Train·Validation·threshold 명시 입력 계약과 기존 출력 옵션을 유지한다. 특히 Step 5 모델 비교의 `--output`을 삭제하지 않는다.
+- 팀원 원본 센서 목록은 `configs/experiments/archive/team_selected_sensors_20.json`에 분석 이력으로 보존한다. 생성 데이터·가중치의 정확성을 보증하거나 추론 입력으로 승인한 목록은 아니다.
+- 팀원 그래프 6개는 `reports/secom/figures/exploratory/team_proposal/`에 별도 보존한다. 기존 그림 두 개는 기존 커밋 내용을 유지하며 팀원 원본 그림을 보완 코드의 재실행 결과라고 표시하지 않는다.
+
+### 기존 Test 평가 기록
+
 V1과 동일한 Test 236행·불량 9행에서 저장 V2를 재학습 없이 평가했다. V1 Recall 11.11%(TP 1·FP 30·FN 8)에 대해 V2 90% 목표는 Recall 100%(TP 9·FP 215·FN 0), V2 80% 목표는 Recall 66.67%(TP 6·FP 103·FN 3)였다. V2 AP는 0.075077, ROC-AUC는 0.682330이다. 개발 구간의 88.89%와 구분하며 과거 결과를 참고한 기존 Test 비교이지 완전 미사용 독립 평가가 아니다.
 
 상세 조건은 [보고서 35.5절](report.md#355-저장-v2의-기존-v1-test-구간-비교--2026-10-09), 원본은 `logs/secom/v2/v2_recall90_existing_test/`, `logs/secom/v2/v2_recall80_existing_test/`에 보존한다. 이미 완료한 평가를 문서 작성을 위해 다시 실행하지 않았다.

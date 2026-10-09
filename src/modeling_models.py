@@ -155,7 +155,10 @@ def build_classifier(config, name, *, n_jobs=1, n_estimators=300):
     seed = config.experiment.cv.random_state
     if name in {"logistic_regression_l1", "logistic_regression_l1_balanced"}:
         return LogisticRegression(
-            penalty="l1", solver="liblinear", max_iter=2000, random_state=seed,
+            penalty="l1",
+            solver="liblinear",
+            max_iter=2000,
+            random_state=seed,
             class_weight="balanced" if name.endswith("_balanced") else None,
         )
     if name == "rbf_svm":

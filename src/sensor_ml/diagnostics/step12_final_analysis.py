@@ -67,21 +67,19 @@ def plot_random_vs_time() -> None:
         RANDOM_TIME_PATH
     )
 
+
     metrics = [
-        "average_precision",
-        "recall",
-        "precision",
-        "f1",
-        "roc_auc",
+        "AP",
+        "Recall",
+        "Precision",
+        "F1",
+        "ROC-AUC",
     ]
 
-    random_row = result[
-        result["split"] == "random"
-    ].iloc[0]
-
-    time_row = result[
-        result["split"] == "time"
-    ].iloc[0]
+    # 팀원 수정 반영: Step 10이 저장하는 실제 컬럼명·대소문자를 사용한다.
+    split_names = result["validation"].astype(str).str.strip().str.lower()
+    random_row = result.loc[split_names == "random"].iloc[0]
+    time_row = result.loc[split_names == "time"].iloc[0]
 
     random_values = [
         random_row[m]
