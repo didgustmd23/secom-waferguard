@@ -15,10 +15,10 @@ import pandas as pd
 from src.modeling_config import MODELING_CONFIG
 from src.modeling_models import build_pipeline, configure_topk_xgb
 from src.split_contract import SOURCE_ROW_ID, SPLIT_ROLE, PROTOCOL_ID
-from src.experiments.top20_time_validation import prepare_candidate, compare_all_sensors, save_sensor_comparison
+from src.sensor_ml.experiments.top20_time_validation import prepare_candidate, compare_all_sensors, save_sensor_comparison
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from src.experiments.step7_time_validation import compare_time_validation
+from src.sensor_ml.experiments.step7_time_validation import compare_time_validation
 
 
 class Top20TimeValidationTest(unittest.TestCase):

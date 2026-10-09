@@ -21,7 +21,7 @@ from sklearn.pipeline import Pipeline
 
 from src.modeling_preprocessing import SensorQualityFilter
 from src.sensor_inference import build_sensor_inference
-from src.inference.sensor_bundle import load_sensor_bundle, save_sensor_bundle, verify_sensor_bundle
+from src.sensor_ml.inference.sensor_bundle import load_sensor_bundle, save_sensor_bundle, verify_sensor_bundle
 
 
 class SensorBundleTest(unittest.TestCase):
@@ -48,7 +48,7 @@ class SensorBundleTest(unittest.TestCase):
             self.assertTrue(manifest["contains_local_sensor_samples"])
             self.assertEqual(manifest["verification_rows"], 21)
             result = subprocess.run(
-                [sys.executable, "-m", "src.inference.sensor_bundle", "--bundle-dir", str(directory),
+                [sys.executable, "-m", "src.sensor_ml.inference.sensor_bundle", "--bundle-dir", str(directory),
                  "--trusted-local-bundle"], cwd=Path(__file__).resolve().parents[1],
                 capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -58,7 +58,7 @@ class SensorBundleTest(unittest.TestCase):
             for options in (["--export-demo-input", str(demo)],
                             ["--input", str(demo), "--output", str(predictions)]):
                 completed = subprocess.run(
-                    [sys.executable, "-m", "src.inference.predict_cli", "--bundle-dir", str(directory),
+                    [sys.executable, "-m", "src.sensor_ml.inference.predict_cli", "--bundle-dir", str(directory),
                      "--trusted-local-bundle", *options], cwd=Path(__file__).resolve().parents[1],
                     capture_output=True, text=True, timeout=30)
                 self.assertEqual(completed.returncode, 0, completed.stderr)

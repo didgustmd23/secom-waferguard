@@ -10,7 +10,7 @@ import pandas as pd
 
 from src.modeling_config import MODELING_CONFIG
 from src.split_contract import SOURCE_ROW_ID, SPLIT_ROLE, PROTOCOL_ID
-from src.experiments.recent_window_compare import compare_recent_windows, recent_training_rows, analyze_window_folds, compare_window_sensors
+from src.sensor_ml.experiments.recent_window_compare import compare_recent_windows, recent_training_rows, analyze_window_folds, compare_window_sensors
 
 
 class RecentWindowTest(unittest.TestCase):

@@ -20,7 +20,7 @@ from src.modeling_config import (
     ExperimentProtocol,
     MODELING_CONFIG,
 )
-from src.experiments.step6_feature_compare import compare_features
+from src.sensor_ml.experiments.step6_feature_compare import compare_features
 from src.modeling_models import build_pipeline, fit_pipeline
 
 
@@ -43,7 +43,7 @@ class FeatureComparisonTest(unittest.TestCase):
         # M1·M2·M3을 같은 작은 데이터에서 각각 독립적으로 검증한다.
         for depth, reg_lambda in ((2, None), (None, 5), (2, 5)):
             with self.subTest(depth=depth, reg_lambda=reg_lambda):
-                with patch("src.experiments.step6_feature_compare.build_pipeline", side_effect=small_pipeline):
+                with patch("src.sensor_ml.experiments.step6_feature_compare.build_pipeline", side_effect=small_pipeline):
                     result = compare_features(self._frame(), self.config,
                                               experiment_names=("xgboost_all", "xgboost_rf_top_2"),
                                               topk_xgb_max_depth=depth, topk_xgb_reg_lambda=reg_lambda)

@@ -7,13 +7,15 @@
 
 import unittest
 from dataclasses import replace
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
 
 from src.modeling_config import MODELING_CONFIG
+from src.modeling_models import build_candidate_pipelines
 from src.split_contract import SOURCE_ROW_ID, SPLIT_ROLE, PROTOCOL_ID
-from src.experiments.temporal_validation import temporal_folds, compare_temporal
+from src.sensor_ml.experiments.temporal_validation import temporal_folds, compare_temporal
 
 
 class TemporalValidationTest(unittest.TestCase):
@@ -40,6 +42,26 @@ class TemporalValidationTest(unittest.TestCase):
             eval_time = pd.to_datetime(evaluation.timestamp, format=self.config.dataset.timestamp_format)
             self.assertLess(fit_time.max(), eval_time.min())
             self.assertFalse(set(train.timestamp) & set(evaluation.timestamp))
+
+    def test_rf_variants_use_requested_candidates(self):
+        """RF 가중치·leaf 후보가 같은 시간 분할·OOF 경로로 실행된다."""
+        names = ("random_forest", "random_forest_balanced",
+                 "random_forest_leaf3", "random_forest_leaf5")
+        # 실제 데이터 대신 합성 데이터와 트리 2개로 연결 경로만 확인한다.
+        def small_candidates(config, n_jobs=1, *, names=None):
+            pipelines = build_candidate_pipelines(config, n_jobs=n_jobs, names=names)
+            for pipeline in pipelines.values():
+                pipeline.set_params(model__n_estimators=2)
+            return pipelines
+
+        with patch("src.sensor_ml.experiments.temporal_validation.build_candidate_pipelines",
+                   side_effect=small_candidates) as build:
+            results = compare_temporal(self._frame(), self.config, model_names=names,
+                                       oof_modes=("temporal_oof",))
+        self.assertEqual(build.call_args.kwargs["names"], names)
+        self.assertEqual(set(results["summary"].model_name), set(names))
+        self.assertEqual(len(results["fold_results"]), len(names) * 3 * 2)
+        self.assertEqual(len(results["quality_filter"]), len(names) * 3 * 3)
 
     def test_rejects_group_crossing_time_boundary(self):
         frame = self._frame().assign(machine="same_group")

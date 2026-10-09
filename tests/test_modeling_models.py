@@ -15,10 +15,10 @@ from sklearn.base import clone
 
 from src.modeling_config import MODELING_CONFIG
 from src.modeling_models import (
-    XGBoostClassifierAdapter, build_pipeline, fit_pipeline, positive_scores,
+    XGBoostClassifierAdapter, build_candidate_pipelines, build_pipeline, fit_pipeline, positive_scores,
 )
-from src.experiments.step8_threshold_oof import generate_oof_scores
-from src.diagnostics.step9_error_analysis import analyze_time_validation_errors
+from src.sensor_ml.experiments.step8_threshold_oof import generate_oof_scores
+from src.sensor_ml.diagnostics.step9_error_analysis import analyze_time_validation_errors
 
 
 class ModelingModelsTest(unittest.TestCase):
@@ -57,6 +57,44 @@ class ModelingModelsTest(unittest.TestCase):
                 first = build_pipeline(self.config, alias).named_steps["model"]
                 second = build_pipeline(self.config, candidate).named_steps["model"]
                 self.assertEqual(first.get_params(), second.get_params())
+
+    def test_rf_balanced_is_explicit_and_changes_only_weight(self):
+        """RF 가중치만 바꾸고 기본 실험 목록과 전처리를 보존한다."""
+        self.assertNotIn("random_forest_balanced", build_candidate_pipelines(self.config))
+        names = ("random_forest", "random_forest_balanced")
+        pipelines = build_candidate_pipelines(self.config, names=names)
+        first = pipelines[names[0]].named_steps["model"].get_params()
+        second = pipelines[names[1]].named_steps["model"].get_params()
+        self.assertEqual(second.pop("class_weight"), "balanced")
+        self.assertIsNone(first.pop("class_weight"))
+        self.assertEqual(first, second)
+        self.assertEqual([name for name, _ in pipelines[names[0]].steps],
+                         [name for name, _ in pipelines[names[1]].steps])
+        # 작은 합성 데이터로 label 방향과 독립 학습을 확인한다.
+        frame = self._frame()
+        template = pipelines[names[1]].set_params(model__n_estimators=2)
+        fitted = fit_pipeline(template, frame.drop(columns="target"), frame.target,
+                              self.config, names[1])
+        scores = positive_scores(fitted, frame.drop(columns="target"), self.config.dataset)
+        self.assertEqual(len(scores), len(frame))
+        self.assertFalse(hasattr(template.named_steps["model"], "classes_"))
+
+    def test_rf_leaf_variants_change_only_leaf_size(self):
+        """leaf 제한만 변경하고 기본 후보와 센서 선택용 RF는 보존한다."""
+        baseline = build_pipeline(self.config, "random_forest")
+        default_names = build_candidate_pipelines(self.config)
+        for name, leaf in (("random_forest_leaf3", 3), ("random_forest_leaf5", 5)):
+            with self.subTest(name=name):
+                self.assertNotIn(name, default_names)
+                pipeline = build_candidate_pipelines(self.config, names=(name,))[name]
+                expected = baseline.named_steps["model"].get_params()
+                expected["min_samples_leaf"] = leaf
+                self.assertEqual(pipeline.named_steps["model"].get_params(), expected)
+                self.assertEqual([key for key, _ in pipeline.steps],
+                                 [key for key, _ in baseline.steps])
+        # S0 특징 선택용 RF는 기존 leaf=1 설정을 유지해야 한다.
+        selector = build_pipeline(self.config, "xgboost_rf_top_1").named_steps["selector"]
+        self.assertEqual(selector.estimator.min_samples_leaf, 1)
 
     def test_fit_clones_and_sets_training_weight(self):
         frame = self._frame()
@@ -114,7 +152,7 @@ class ModelingModelsTest(unittest.TestCase):
             model = fit_pipeline(*args, **kwargs)
             fitted_models.append(model)
             return model
-        with patch("src.experiments.step8_threshold_oof.fit_pipeline", side_effect=record_fit):
+        with patch("src.sensor_ml.experiments.step8_threshold_oof.fit_pipeline", side_effect=record_fit):
             oof, _ = generate_oof_scores(
                 self._frame(), self.config, experiment_name="xgboost", n_jobs=2,
             )
@@ -128,7 +166,7 @@ class ModelingModelsTest(unittest.TestCase):
             "sensor_a": [0.11, 0.87], "sensor_b": [0.88, 0.14],
             "target": ["pass", "fail"],
         })
-        with patch("src.diagnostics.step9_error_analysis.fit_pipeline", wraps=fit_pipeline) as fit:
+        with patch("src.sensor_ml.diagnostics.step9_error_analysis.fit_pipeline", wraps=fit_pipeline) as fit:
             cases, summary, features = analyze_time_validation_errors(
                 self._frame(), validation, self.config,
                 threshold=0.5, experiment_name="xgboost", n_jobs=2,

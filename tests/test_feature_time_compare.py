@@ -11,12 +11,109 @@ from dataclasses import replace
 import numpy as np
 import pandas as pd
 
-from src.experiments.feature_time_compare import compare_feature_time, selection_rows, build_feature_pipelines
+from src.sensor_ml.experiments.feature_time_compare import compare_feature_time, selection_rows, build_feature_pipelines
 from src.modeling_config import MODELING_CONFIG
 from src.split_contract import SOURCE_ROW_ID, SPLIT_ROLE, PROTOCOL_ID
+from src.sensor_ml.experiments.time_weight_compare import DEFAULT_PRESET, build_weight_candidates
 
 
 class FeatureTimeComparisonTest(unittest.TestCase):
+    # ==========================================
+    # gain Top-K 최종 분류기의 깊이·규제 변경 범위 검증
+    # - 단일·반복 선택기의 파라미터는 변경하지 않음
+    # - 전체 센서 기준 모델도 유지해 기존 결과와 비교 가능
+    # ==========================================
+    def test_gain_topk_classifier_overrides(self):
+        """gain 선택기를 보존하고 최종 분류기의 지정 값만 변경한다."""
+        names = ("xgboost_all", "xgboost_top_20")
+        for repeats in (0, 5):
+            options = dict(experiment_names=names, xgb_weight_mode="ratio",
+                           xgb_selector_weight_mode="ratio", xgb_stability_repeats=repeats)
+            base = build_feature_pipelines(MODELING_CONFIG, **options)
+            changed = build_feature_pipelines(MODELING_CONFIG, **options,
+                                              topk_xgb_max_depth=2, topk_xgb_reg_lambda=5)
+            self.assertEqual(base[names[0]].named_steps["model"].get_params(),
+                             changed[names[0]].named_steps["model"].get_params())
+            # 선택용 XGBoost의 깊이 3과 규제 1은 그대로 유지한다.
+            for key, value in base[names[1]].named_steps["selector"].get_params().items():
+                if isinstance(value, (str, int, float, bool, type(None))):
+                    actual = changed[names[1]].named_steps["selector"].get_params()[key]
+                    # 결측 표시용 NaN은 값의 동일성 대신 둘 다 NaN인지 확인한다.
+                    if isinstance(value, float) and np.isnan(value):
+                        self.assertTrue(np.isnan(actual))
+                    else:
+                        self.assertEqual(value, actual)
+            expected = base[names[1]].named_steps["model"].get_params()
+            expected.update(max_depth=2, reg_lambda=5)
+            self.assertEqual(expected, changed[names[1]].named_steps["model"].get_params())
+
+    def test_gain_weight_changes_only_selector_and_is_fold_local(self):
+        """선택기 가중치만 변경하고 실제 fit별 계산과 Top-20 선택을 확인한다."""
+        names = ("xgboost_all", "xgboost_top_20", "xgboost_rf_top_20")
+        base = build_feature_pipelines(MODELING_CONFIG, experiment_names=names,
+                                       xgb_weight_mode="ratio")
+        weighted = build_feature_pipelines(MODELING_CONFIG, experiment_names=names,
+                                           xgb_weight_mode="ratio", xgb_selector_weight_mode="ratio")
+        for name in names:
+            self.assertEqual(base[name].named_steps["model"].get_params(),
+                             weighted[name].named_steps["model"].get_params())
+        self.assertEqual(base[names[2]].named_steps["selector"].estimator.get_params(),
+                         weighted[names[2]].named_steps["selector"].estimator.get_params())
+        expected = base[names[1]].named_steps["selector"].estimator.get_params()
+        expected["class_weight_mode"] = "ratio"
+        self.assertEqual(weighted[names[1]].named_steps["selector"].estimator.get_params(), expected)
+        # 불균형 합성 label로 무가중치 1과 실제 정상/불량 비율을 구분한다.
+        frame = self.frame()
+        frame["label"] = [-1, -1, -1, 1] * 12
+        results = compare_feature_time(frame, MODELING_CONFIG, n_estimators=3,
+                                       experiment_names=names[:2], xgb_weight_mode="ratio",
+                                       xgb_selector_weight_mode="ratio")
+        weights = results["fit_weights"].query("model_name == 'xgboost_top_20'")
+        self.assertEqual(len(weights), 9)
+        self.assertTrue(weights.selector_class_weight_mode.eq("ratio").all())
+        np.testing.assert_allclose(weights.selector_effective_scale_pos_weight,
+                                   weights.train_negative / weights.train_positive)
+        self.assertTrue(weights.selector_effective_scale_pos_weight.gt(1).all())
+        top = results["selected_features"].query("model_name == 'xgboost_top_20'")
+        self.assertTrue(top.groupby("fit_id").feature.nunique().eq(20).all())
+        self.assertTrue(top.selection_method.eq("xgboost_gain").all())
+        for options in ({"xgb_selector_weight_mode": "invalid"},
+                        {"xgb_selector_weight_mode": "ratio"},
+                        {"xgb_selector_weight_mode": "ratio", "experiment_names": names[2:]},
+                        {"xgb_selector_weight_mode": "ratio", "experiment_names": names[:1]}):
+            with self.assertRaises(ValueError):
+                build_feature_pipelines(MODELING_CONFIG, **options)
+
+    def test_p0_weight_matches_baseline_and_stays_in_folds(self):
+        """P0 설정을 전체·Top-20에 동일 적용하고 실제 학습별 가중치를 확인한다."""
+        names = ("xgboost_all", "xgboost_rf_top_20")
+        preset = json.loads(DEFAULT_PRESET.read_text(encoding="utf-8"))
+        reference = build_weight_candidates(MODELING_CONFIG, preset)["v2_m0_ratio"]
+        chosen = build_feature_pipelines(MODELING_CONFIG, experiment_names=names,
+                                        xgb_weight_mode="ratio")
+        for pipeline in chosen.values():
+            self.assertEqual(pipeline.named_steps["model"].get_params(),
+                             reference.named_steps["model"].get_params())
+        # RF 센서 선택용 모델은 S0의 무가중치·leaf=1을 보존한다.
+        selector = chosen[names[1]].named_steps["selector"].estimator
+        self.assertIsNone(selector.class_weight)
+        self.assertEqual(selector.min_samples_leaf, 1)
+        results = compare_feature_time(self.frame(), MODELING_CONFIG, n_estimators=3,
+                                       experiment_names=names, xgb_weight_mode="ratio")
+        weights = results["fit_weights"]
+        self.assertEqual(len(weights), 18)
+        self.assertTrue(weights.class_weight_mode.eq("ratio").all())
+        np.testing.assert_allclose(weights.effective_scale_pos_weight,
+                                   weights.train_negative / weights.train_positive)
+        selected = results["selected_features"]
+        top = selected[selected.model_name.eq(names[1])]
+        self.assertTrue(top.groupby("fit_id").feature.nunique().eq(20).all())
+        self.assertTrue(top.selection_method.eq("rf_importance").all())
+        for options in ({"xgb_weight_mode": "invalid"}, {"xgb_weight_mode": "ratio"},
+                        {"xgb_weight_mode": "ratio", "experiment_names": ("lightgbm_all",)}):
+            with self.assertRaises(ValueError):
+                build_feature_pipelines(MODELING_CONFIG, **options)
+
     # ==========================================
     # M2 단독 정규화·M3 깊이와 정규화 결합의 적용 범위 검증
     # - 전체 센서 M0와 RF 선택기는 보존하고 최종 분류기만 변경
