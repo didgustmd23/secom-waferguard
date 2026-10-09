@@ -33,7 +33,7 @@ except ModuleNotFoundError:
     from split_contract import SOURCE_ROW_ID, PROTOCOL_ID, validate_train_role, training_folds
 
 
-EXPERIMENT_NAME = "lightgbm_all"
+EXPERIMENT_NAME = "xgboost_scale_pos_weight"
 
 
 # ==========================================
@@ -64,9 +64,19 @@ def generate_oof_scores(
     oof_config = config if score_method == "repeated_mean" else replace(
         config, experiment=replace(config.experiment, cv=replace(config.experiment.cv, n_repeats=1))
     )
+    import json
+    
     features, labels, _ = split_frame_to_xy(train_frame, config.dataset)
     if labels.nunique() < 2:
         raise ValueError("OOF를 생성하려면 Train에 정상과 Fail label이 모두 있어야 합니다.")
+
+    # 스텝 5에서 추출한 20개 센서 목록이 있다면 적용
+    selected_sensors_path = Path("logs/selected_sensors_20.json")
+    if selected_sensors_path.exists():
+        with open(selected_sensors_path, "r", encoding="utf-8") as f:
+            top_20_sensors = json.load(f)
+        features = features[top_20_sensors]
+        print(f"[알림] 20개 선정 센서 기반으로 OOF를 진행합니다. (입력 개수: {features.shape[1]})")
 
     experiment_pipeline = build_pipeline(config, experiment_name, n_jobs=n_jobs)
 
@@ -254,18 +264,41 @@ def main() -> None:
         score_method=arguments.score_method,
         experiment_name=arguments.experiment,
     )
-    # 전체 비교표는 CSV에 저장하고, 콘솔에는 판단에 필요한 대표 후보만 표시한다.
-    default_row = threshold_frame.loc[
-        np.isclose(threshold_frame["threshold"], 0.5)
-    ]
-    console_summary = pd.concat(
-        [
-            threshold_frame.nlargest(5, "f1"),
-            threshold_frame.nlargest(5, "recall"),
-            default_row,
+    
+    print("\n" + "=" * 65)
+    print("📊 Recall 목표 완화에 따른 Precision(정확도) 변화 비교")
+    print("=" * 65)
+    
+    target_recalls = [0.40, 0.50, 0.60, 0.70]
+    comparison_rows = []
+
+    for target in target_recalls:
+        # 해당 Recall 이상을 만족하고 유효한 Threshold(> 0.0001) 구간 필터링
+        candidates = threshold_frame[
+            (threshold_frame["recall"] >= target) & (threshold_frame["threshold"] > 0.0001)
         ]
-    ).drop_duplicates(subset=["threshold"]).sort_values("threshold")
-    print(console_summary.to_string(index=False))
+        if not candidates.empty:
+            # Precision이 가장 높은 행 선택
+            best_row = candidates.sort_values(
+                by=["precision", "f1", "threshold"], 
+                ascending=[False, False, False]
+            ).iloc[0]
+            comparison_rows.append({
+                "Target Recall": f">={int(target*100)}%",
+                "Threshold": f"{best_row['threshold']:.4f}",
+                "Recall (실제)": f"{best_row['recall']*100:.2f}%",
+                "Precision (정확도)": f"{best_row['precision']*100:.2f}%",
+                "F1-Score": f"{best_row['f1']:.4f}",
+                "Reinspection Ratio": f"{best_row['reinspection_ratio']*100:.2f}%"
+            })
+
+    if comparison_rows:
+        summary_df = pd.DataFrame(comparison_rows)
+        print(summary_df.to_string(index=False))
+        print("=" * 65 + "\n")
+    else:
+        print("⚠️ 조건을 만족하는 Threshold 구간을 찾지 못했습니다.")
+
     print(f"OOF 생성 시간(초): {elapsed_seconds:.3f}")
     print(f"OOF 저장 경로: {arguments.oof_output}")
     print(f"Threshold 비교 저장 경로: {arguments.threshold_output}")

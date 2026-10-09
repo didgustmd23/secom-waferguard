@@ -308,89 +308,41 @@ print(
 
 
 # ============================================================
-# 9. Logistic Regression Feature Importance
+# 9. LightGBM Feature Importance & Top 20 센서 추출
 # ============================================================
-#
-# Logistic Regression coefficient의 절댓값을
-# feature 영향도처럼 사용한다.
-#
-# coefficient의 절댓값이 클수록
-# 해당 feature가 모델의 결정에 더 큰 영향을 줄 가능성이 있다.
-#
-# 주의:
-# Tree 모델의 feature_importances_와 동일한 개념은 아니다.
-# ============================================================
+import json
+from lightgbm import LGBMClassifier
 
 print("\n" + "=" * 70)
-print("[4] Logistic Regression Feature Importance")
+print("[4] LightGBM Feature Importance (Top 20 추출)")
 print("=" * 70)
 
-
-baseline_pipeline = Pipeline(
-    steps=[
-        (
-            "imputer",
-            SimpleImputer(
-                strategy="median"
-            ),
-        ),
-        (
-            "scaler",
-            StandardScaler(),
-        ),
-        (
-            "model",
-            LogisticRegression(
-                max_iter=1000,
-                random_state=(
-                    config.experiment.cv.random_state
-                ),
-            ),
-        ),
-    ]
+# 트리 기반 모델 학습 (Gain 기준 및 클래스 불균형 반영)
+lgb_model = LGBMClassifier(
+    random_state=config.experiment.cv.random_state,
+    n_estimators=200,
+    importance_type='gain',  # 변별력이 높은 Gain 기준 사용
+    scale_pos_weight=(len(y_train) - sum(y_train)) / sum(y_train), # 불량 비율 가중치 반영
+    verbose=-1
 )
+lgb_model.fit(X_train, y_train)
 
-
-# Train에만 fit
-baseline_pipeline.fit(
-    X_train,
-    y_train,
-)
-
-
-model = baseline_pipeline.named_steps[
-    "model"
-]
-
-coefficients = model.coef_[0]
-
-
+# Importance 추출
 feature_importance = pd.DataFrame(
     {
         "feature": feature_columns,
-        "coefficient": coefficients,
-        "importance": abs(coefficients),
+        "importance": lgb_model.feature_importances_,
     }
-)
+).sort_values("importance", ascending=False).reset_index(drop=True)
 
+# 상위 20개 센서 추출 및 JSON 파일 저장
+top_20_sensors = feature_importance["feature"].head(20).tolist()
+selected_sensors_path = LOG_DIR / "selected_sensors_20.json"
 
-feature_importance = (
-    feature_importance
-    .sort_values(
-        "importance",
-        ascending=False,
-    )
-    .reset_index(drop=True)
-)
+with open(selected_sensors_path, "w", encoding="utf-8") as f:
+    json.dump(top_20_sensors, f, ensure_ascii=False, indent=4)
 
-
-print("\nTop 20 Feature Importance")
-
-print(
-    feature_importance
-    .head(20)
-    .to_string(index=False)
-)
+print(f"\n[성공] 상위 20개 센서 저장 완료: {selected_sensors_path}")
 
 
 # ------------------------------------------------------------
