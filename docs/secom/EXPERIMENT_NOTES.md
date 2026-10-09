@@ -163,7 +163,7 @@ python -m src.sensor_ml.diagnostics.sensor_importance --train data/splits/integr
 
 수치형 median의 센서별 독립성은 PCA·범주형 인코딩·센서 간 파생 연산으로 자동 확장되지 않는다. 선택기를 추론에서 제외해도 현재 모듈의 LightGBM import 등 라이브러리 의존성이 사라지는 것은 아니다. 저장 환경은 manifest를 따른다. Agent·외부 LLM API는 코어 학습·추론의 필수 의존성이 아니다.
 
-저장 전후 확률·판정 일치는 구현 검증이고 일반화 성능이 아니다. 개발 구간, OOF, Train 유래 데모, 독립 Test의 수치를 서로 대체하지 않는다. WM-811K 확장 설계는 [별도 문서](../../WM811K_BASIC_DESIGN.md)에 유지한다.
+저장 전후 확률·판정 일치는 구현 검증이고 일반화 성능이 아니다. 개발 구간, OOF, Train 유래 데모, 독립 Test의 수치를 서로 대체하지 않는다. WM-811K 확장 설계는 [별도 문서](../WM811K/WM811K_BASIC_DESIGN.md)에 유지한다.
 
 ## 9. 팀원 LightGBM gain 후보 비교 — 2026-10-09
 

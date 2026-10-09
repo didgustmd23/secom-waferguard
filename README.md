@@ -2,7 +2,7 @@
 
 > 전처리 에이전트·센서 기반 머신러닝·웨이퍼맵 딥러닝으로 구성하는 반도체 품질 분석 프로토타입
 
-[프로젝트 문서](docs/README.md) · [에이전트·WM-811K 설계](WM811K_BASIC_DESIGN.md) · [SECOM 결과](reports/README.md#secom-공개-결과-요약) · [SECOM Model Card](docs/secom/model_card_v2.md)
+[프로젝트 문서](docs/README.md) · [에이전트·WM-811K 설계](docs/WM811K/WM811K_BASIC_DESIGN.md) · [SECOM 결과](reports/README.md#secom-공개-결과-요약) · [SECOM Model Card](docs/secom/model_card_v2.md)
 
 ## 프로젝트 소개
 
@@ -13,7 +13,7 @@
 | 영역 | 역할 | 담당 | 현재 상태 |
 | --- | --- | --- | --- |
 | 전처리 에이전트 | WM-811K 수집·품질 검사·Lot 분할·변환·입력 계약 검증의 실행과 기록 관리 | 양현승 | 설계 단계 |
-| SECOM 머신러닝 | 공정 센서로 불량 위험 선별, 핵심 센서 20개 선택, OOF 문턱 비교·저장·추론 | ML: 양현승 / 데이터·EDA: 이종수 | V2 개발 실험·후보 저장·복원·추론 데모 완료 |
+| SECOM 머신러닝 | 공정 센서로 불량 위험 선별, 핵심 센서 20개 선택, OOF 문턱 비교·저장·추론 | ML: 양현승 / 데이터·EDA: 이종수 | V2 실험·저장·복원·기존 Test 비교 완료 |
 | WM-811K 딥러닝 | 검사 결과 맵의 9종 패턴 분류, 작은 CNN·ResNet18 비교, 클래스별 오류 분석 | 이종수 | 설계 단계 |
 
 에이전트는 설정으로 정한 전처리 코드를 실행·관리하는 역할입니다. 라벨·split·변환 기준을 임의로 바꾸거나 모델 판정을 대신하지 않습니다. 기존 SECOM 전처리는 에이전트 없이 실행할 수 있으며, 현재 에이전트의 구현 범위는 WM-811K 맵 전처리로 계획되어 있습니다.
@@ -60,11 +60,27 @@ AP 상대 하락은 **1.96%**입니다. 전체 모델은 깊이 3, Top-20은 깊
 
 독립 최종 Test 결과나 미래 검출률 보장이 아니며, 높은 Recall과 함께 많은 정상 표본도 선별됩니다. 정확한 문턱·집계값·평가 범위는 [공개 결과 요약](reports/README.md#secom-공개-결과-요약), 선택 과정과 과거 V1 결과는 [실험 요약](docs/secom/SECOM_ML_SUMMARY.md)과 [보고서](docs/secom/report.md)에 기록했습니다.
 
+### 기존 Test에서 V1·V2 비교 — ML 실험 마무리
+
+저장된 V2를 **V1과 동일한 Test 236행·불량 9건**에서 재학습·문턱 조절 없이 평가했습니다. 위 개발 구간 272행의 결과와 구분합니다.
+
+| 후보 | Recall | 위험 대상 선별 비율 | TP / FP / FN / TN |
+| --- | ---: | ---: | --- |
+| V1 | 11.11% | 13.14% | 1 / 30 / 8 / 197 |
+| V2 — OOF 목표 90% | 100.00% | 94.92% | 9 / 215 / 0 / 12 |
+| V2 — OOF 목표 80% | 66.67% | 46.19% | 6 / 103 / 3 / 124 |
+
+AP는 V1 **0.040461 → V2 0.075077**, ROC-AUC는 **0.488008 → 0.682330**으로 개선됐습니다. 다만 90% 시나리오는 거의 전부를 선별하고, 80% 시나리오는 Test Recall 목표에 미달했습니다. V1의 평가 결과를 참고한 개발 이력이 있어 완전 미사용 독립 Test로 주장하지 않습니다.
+
+동일 학습 범위·XGBoost 설정의 전체 센서 444개 기준도 같은 Test에서 비교했습니다. AP는 전체 **0.065251**, 고정 Top-20 **0.075077**입니다. Top-20은 검출 건수가 많지만 선별 부담도 높습니다. [전체 센서 비교 그림](reports/README.md#전체-센서고정-top-20의-동일-test-비교)과 [상세 보고서](docs/secom/report.md#37-전체-센서고정-top-20의-동일-기존-test-비교--2026-10-09)를 함께 확인하세요.
+
+팀원 제안인 LightGBM gain Top-20도 시간순·동일 OOF Recall 목표로 비교했으나 기존 V2 대비 개선을 확인하지 못해 비교 이력으로 보존했습니다. **기존 V2를 주후보로 유지하며 SECOM ML 실험을 마무리합니다.** 상세 조건은 [보고서 35.5·36절](docs/secom/report.md#355-저장-v2의-기존-v1-test-구간-비교--2026-10-09)을 참고하세요.
+
 ## 데이터와 그래프
 
 데이터 출처는 [UCI SECOM](https://archive.ics.uci.edu/dataset/179/secom)입니다. 센서 파일과 label·timestamp 파일을 병합하며, label은 `-1`(정상), `1`(불량)입니다. 원본 데이터는 저장소에 포함하지 않습니다.
 
-WM-811K는 [Kaggle 배포본](https://www.kaggle.com/datasets/qingyi/wm811k-wafer-map)을 사용할 예정입니다. 맵·라벨·Lot 검사, 미라벨 분리와 Lot 비중첩 분할을 거쳐 딥러닝 입력을 준비합니다. 데이터 계약·모델 후보·평가 지표·예정 모듈은 [기초 설계](WM811K_BASIC_DESIGN.md)에 기록했으며 아직 데이터 준비·학습 완료를 뜻하지 않습니다.
+WM-811K는 [Kaggle 배포본](https://www.kaggle.com/datasets/qingyi/wm811k-wafer-map)을 사용할 예정입니다. 맵·라벨·Lot 검사, 미라벨 분리와 Lot 비중첩 분할을 거쳐 딥러닝 입력을 준비합니다. 데이터 계약·모델 후보·평가 지표·예정 모듈은 [기초 설계](docs/WM811K/WM811K_BASIC_DESIGN.md)에 기록했으며 아직 데이터 준비·학습 완료를 뜻하지 않습니다.
 
 ![SECOM 클래스 분포](reports/secom/figures/eda/step3/class_distribution.png)
 
@@ -117,7 +133,7 @@ models/           로컬 후보 모델 묶음
 
 소스별 역할은 [src/README.md](src/README.md), 진행 체크와 팀 역할은 [PLAN](docs/secom/PLAN.md), 실험별 재현 조건은 [실험 노트](docs/secom/EXPERIMENT_NOTES.md)에서 관리합니다.
 
-SECOM 실행기는 `src/sensor_ml/`으로 구분했습니다. `src/agents/`와 `src/wafer_dl/`는 구현 전 예약 영역이며, 역할 안내는 [src/README.md](src/README.md)에 통합했습니다. 추가 역할과 입력 계약은 [WM-811K 설계](WM811K_BASIC_DESIGN.md)를 따릅니다.
+SECOM 실행기는 `src/sensor_ml/`으로 구분했습니다. `src/agents/`와 `src/wafer_dl/`는 구현 전 예약 영역이며, 역할 안내는 [src/README.md](src/README.md)에 통합했습니다. 추가 역할과 입력 계약은 [WM-811K 설계](docs/WM811K/WM811K_BASIC_DESIGN.md)를 따릅니다.
 
 ## 한계와 확장
 
