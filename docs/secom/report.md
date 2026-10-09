@@ -1538,6 +1538,16 @@ V1 결과를 참고한 후 V2를 개발했으므로 완전 미사용 독립 Test
 
 근거는 `logs/secom/v1/m3_frozen_time_evaluation/`, `logs/secom/v2/v2_recall90_existing_test/`, `logs/secom/v2/v2_recall80_existing_test/`의 `evaluation.json`, `test_result.csv`, `test_predictions.csv`다. 실행기는 `src/sensor_ml/evaluation/evaluate_v2_test.py`이며 이 기록을 위해 평가를 다시 실행하지 않았다.
 
+#### 기존 Test 결과 시각화
+
+아래 그림은 저장된 236행 예측과 평가 기록의 지표를 대조한 뒤 생성했다. 재학습·재예측·문턱 재선택은 하지 않았다. PR 곡선은 같은 V2 모델의 공통 확률에 대한 곡선 하나이며 두 문턱의 위치를 표시한다. 오른쪽 패널은 낮은 정밀도 영역의 확대다. AP 0.075077은 평균 정밀도이며 사다리꼴 적분값과 구분한다.
+
+![V2 기존 Test의 90%·80% 시나리오 혼동행렬](../../reports/secom/figures/v2/existing_test/confusion_matrices.png)
+
+![V2 기존 Test의 공통 PR 곡선과 두 문턱](../../reports/secom/figures/v2/existing_test/precision_recall_curve.png)
+
+90% 목표 시나리오는 미검 0건 대신 정상 215건을 선별하고, 80% 목표 시나리오는 정상 선별을 103건으로 줄이는 대신 불량 3건을 놓친다. 독립 미사용 Test 결과로 해석하지 않는다. 발표 자료는 딥러닝 완료 후 작성한다.
+
 ## 36. 팀원 LightGBM gain Top-20 제안 비교 — 2026-10-09
 
 ### 36.1 제안과 통합 범위
@@ -1594,3 +1604,51 @@ Time Train 내부 외부 시간순 3구간·각 과거 학습 범위의 내부 �
 - 설정: `configs/experiments/team_gain_time_compare.json`.
 
 실제 실험·재분석 명령은 사용자가 실행했다. 이번 팀원 후보 비교는 Train 내부 개발 실험이며 Test를 추가 사용하지 않았고 저장 V2 묶음·문턱을 변경하지 않았다. 35.5절의 고정 후보 Test 비교와 평가 범위를 구분한다. 합산 Recall은 TP 합계/(TP+FN) 합계이며 fold Recall 평균과 다르다. 정확한 문턱은 원본 로그를 따른다.
+
+## 37. 전체 센서·고정 Top-20의 동일 기존 Test 비교 — 2026-10-09
+
+### 37.1 목적과 조건
+
+고정 Top-20만의 Test 결과로 센서 축소 전후를 설명하지 않도록 전체 센서 기준을 추가했다. 전체 센서 모델도 저장 Top-20과 같은 과거 824행으로 학습했고, 최종 XGBoost는 300 trees·깊이 2·규제 1·클래스 비율 가중치로 맞췄다. 과거 전체 센서 실험의 깊이 3 기준과는 별도 실험이다. 전체 센서는 각 학습 범위에서 결측률 50% 초과·상수 센서를 제거하고 중앙값 대치했으며, 최종 유지 센서는 444개다. Top-20은 기존에 고정한 센서 목록을 유지했다.
+
+OOF는 같은 2개 블록(학습 551행→평가 138행, 학습 689행→평가 135행)을 사용했다. 두 모델에 같은 숫자의 문턱을 공유하지 않고, 각 모델의 OOF에서 목표 Recall 달성 후보 중 선별 비율 최소→정밀도 최대→문턱 최대 규칙으로 선택했다. 전체 센서의 OOF는 273행·불량 8건이며, 80% 목표는 TP 7·FP 135·FN 1(Recall 87.5%, 선별 52.01%), 90% 목표는 TP 8·FP 153·FN 0(Recall 100%, 선별 58.97%)이었다. 이 OOF 수치는 아래 Test 결과와 구분한다.
+
+### 37.2 동일 Test 결과
+
+평가는 V1·V2에서 이미 사용한 동일한 236행·불량 9행·정상 227행이다. 저장 전체 센서 모델의 확률을 한 번 계산하고 두 동결 문턱을 적용했다. 기존 Top-20은 저장 평가 로그를 재사용했으며 모델·문턱·결과를 변경하지 않았다.
+
+| OOF 목표 | 모델 | 센서 수 | 문턱 (반올림) | Test Recall | Precision | 선별 비율 | TP | FP | FN | TN |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 80% | 전체 센서 | 444 | 0.049825 | 33.33% | 5.08% | 25.00% | 3 | 56 | 6 | 171 |
+| 80% | 고정 Top-20 | 20 | 0.033903 | 66.67% | 5.50% | 46.19% | 6 | 103 | 3 | 124 |
+| 90% | 전체 센서 | 444 | 0.040878 | 44.44% | 5.41% | 31.36% | 4 | 70 | 5 | 157 |
+| 90% | 고정 Top-20 | 20 | 0.002947 | 100.00% | 4.02% | 94.92% | 9 | 215 | 0 | 12 |
+
+문턱과 무관한 Test AP는 전체 센서 0.065251, Top-20 0.075077이다. ROC-AUC는 각각 0.681351, 0.682330으로 비슷했다. 한 모델의 두 문턱은 공통 확률을 사용하므로 AP·ROC-AUC도 같다.
+
+### 37.3 해석과 한계
+
+- 이번 구간에서는 센서를 20개로 줄인 후보의 AP가 전체 기준보다 낮아지지 않았다. 다만 한 번의 기존 Test 비교만으로 모든 기간의 성능 보존이나 통계적 우위를 주장하지 않는다.
+- 80% 목표에서 Top-20은 불량 검출 건수가 3건 많고 정상 선별은 47건 많았다. 총 선별은 전체 센서 59건, Top-20 109건이다.
+- 90% 목표에서 Top-20은 미검 0건이지만 정상 215건을 선별했다. 전체 센서보다 불량 검출은 5건 많고 정상 선별은 145건 많다. 총 선별은 74건에서 224건으로 늘어난다.
+- 이는 **같은 과거 OOF 목표**에서의 비교이며 **같은 실제 Test Recall 또는 선별 예산**에서의 비교가 아니다. 높은 Recall 차이를 전부 센서 선택의 순수한 효과로 설명하거나 Top-20의 선별 부담이 더 작다고 결론내리지 않는다.
+- 전체 센서에서도 OOF 목표가 Test로 유지되지 않았다. 센서를 많이 쓰는 것만으로 미래 검출률이 보장되지는 않는다. 이 결과만으로 시간 변화·과적합·확률 변화 중 하나를 원인으로 확정하지 않는다.
+- 불량 9건에서 한 건은 Recall 약 11.11%p다. 기존 Test 재사용 비교이며 결과에 맞춰 문턱을 재조정하지 않았다. 연구용 미검 최소화 주 시나리오인 Top-20 90%와 부담 비교용 80%를 그대로 보존한다.
+
+### 37.4 비교 그림과 근거
+
+그림은 저장된 네 시나리오의 평가 지표·행·정답 및 각 모델 내 공통 확률을 검증한 뒤 생성했다. 그림 생성 과정에서 재학습·재예측·문턱 탐색은 하지 않았다.
+
+![OOF 목표 80%의 전체 센서·Top-20 혼동행렬](../../reports/secom/figures/v2/all_vs_fixed20_existing_test/confusion_recall80.png)
+
+![OOF 목표 90%의 전체 센서·Top-20 혼동행렬](../../reports/secom/figures/v2/all_vs_fixed20_existing_test/confusion_recall90.png)
+
+![전체 센서·Top-20의 동일 Test PR 곡선](../../reports/secom/figures/v2/all_vs_fixed20_existing_test/precision_recall_comparison.png)
+
+- 전체 모델·OOF 근거: `logs/secom/v2/v2_all_sensor_reference/`.
+- 동일 Test 결과: `logs/secom/v2/v2_all_vs_fixed20_existing_test/`의 `comparison.csv`, `comparison.md`, 각 `recall80/`·`recall90/` 평가 기록·예측.
+- 고정 Top-20 원본: `logs/secom/v2/v2_recall80_existing_test/`, `logs/secom/v2/v2_recall90_existing_test/`.
+- 공개용 지표 사본: [v2_existing_test_comparison.csv](../../reports/secom/results/v2_existing_test_comparison.csv).
+- 실행기: `all_sensor_reference.py`, `evaluate_all_sensor_test.py`, `plot_sensor_test_compare.py`.
+
+실제 전체 센서 학습·Test 평가는 사용자가 실행했다. 발표는 딥러닝 완료 후 진행한다.

@@ -32,6 +32,8 @@ src/
 | data_pipeline/ | 데이터 병합·품질 점검·분할 | step1_merge_data, step2_data_check, step3_split |
 | experiments/ | Baseline·후보·특징 비교·시간 검증·OOF 실험 | step4_baseline~step8_threshold_oof, top20_oof_compare, top20_time_validation, temporal_validation, time_weight_compare, recent_window_compare, feature_time_compare, anomaly_compare |
 | experiments/missing_value_compare.py | V2 모델을 유지한 결측 처리 비교 | P0 중앙값 / P1 중앙값+indicator / P2 자체 NaN 처리 |
+| experiments/all_sensor_reference.py | 저장 V2와 동일 학습 범위·깊이의 전체 센서 기준 모델 준비 | Train 내부 OOF 문턱 80%·90% 선택, 모델 저장; Test는 별도 평가 |
+| evaluation/evaluate_all_sensor_test.py | 동결 전체 센서 모델의 동일 Test 평가 | 확률 한 번 계산, 두 OOF 문턱 적용, 기존 고정 Top-20과 비교표 저장 |
 | inference/ | 모델 묶음 저장·복원·시나리오 보존·CSV 예측 | sensor_bundle, save_v2_scenario, predict_cli |
 | evaluation/ | 동결 모델 평가·평가 실행 범위 관리 | evaluate_frozen_model, run_evaluation |
 
@@ -116,7 +118,7 @@ from src.sensor_ml.experiments.time_weight_compare import build_weight_candidate
 - 에이전트 없이도 전처리 함수를 실행·검증할 수 있도록 분리합니다.
 - 아직 프레임워크 의존성·실행 명령·LLM 호출을 추가하지 않았습니다.
 
-예정 진입 모듈은 `src/agents/wm_preprocess_agent.py`입니다. 이름만 정리한 계획이며 파일은 아직 없습니다. 자세한 책임과 입력 계약은 [WM-811K 기초 설계](../WM811K_BASIC_DESIGN.md)를 따릅니다.
+예정 진입 모듈은 `src/agents/wm_preprocess_agent.py`입니다. 이름만 정리한 계획이며 파일은 아직 없습니다. 자세한 책임과 입력 계약은 [WM-811K 기초 설계](../docs/WM811K/WM811K_BASIC_DESIGN.md)를 따릅니다.
 
 ## WM-811K 맵 처리와 딥러닝
 
@@ -131,4 +133,4 @@ from src.sensor_ml.experiments.time_weight_compare import build_weight_candidate
 
 작은 CNN과 ResNet18, 9종 패턴 분류, Lot 비중첩 분할을 계획합니다. SECOM 이진 분류 설정·지표를 그대로 사용하지 않으며 입력 채널·클래스 매핑·맵 변환·학습 조건은 별도 계약으로 관리합니다. `config.json`의 SECOM Profile을 WM 설정으로 교체하지 않습니다.
 
-구현 전의 예정 모듈은 파일이나 실행 명령으로 제공하지 않습니다. 데이터·모델·전처리 계약과 평가 범위는 [WM-811K 기초 설계](../WM811K_BASIC_DESIGN.md)를 참고하세요.
+구현 전의 예정 모듈은 파일이나 실행 명령으로 제공하지 않습니다. 데이터·모델·전처리 계약과 평가 범위는 [WM-811K 기초 설계](../docs/WM811K/WM811K_BASIC_DESIGN.md)를 참고하세요.

@@ -23,6 +23,18 @@ GitHub에서 확인할 수 있도록 기존 로컬 결과의 집계값만 보존
 
 같은 고정 센서·학습 통계·분류기에 문턱만 다르게 적용했습니다. 두 시나리오의 AP는 0.323619, ROC-AUC는 0.795944입니다. 독립 최종 Test 결과나 미래 검출률 보장이 아닙니다. 저장·복원 검증의 `test_used=false`는 해당 구현 검증에서 Test를 사용하지 않았다는 뜻이며 프로젝트 전체의 데이터 사용 이력을 보증하지 않습니다.
 
+### 기존 Test 비교 — 개발 구간 CSV와 별도
+
+아래는 저장된 V2를 V1과 같은 Test 236행·불량 9건에 적용한 결과입니다. 위 공개 `v2_fixed_scenarios.csv`는 개발 구간 272행의 기존 요약이며 이번 Test 결과로 덮어쓰지 않습니다.
+
+| 후보 | Recall | 선별 비율 | TP / FP / FN / TN | AP | ROC-AUC |
+| --- | ---: | ---: | --- | ---: | ---: |
+| V1 | 11.11% | 13.14% | 1 / 30 / 8 / 197 | 0.040461 | 0.488008 |
+| V2 — OOF 목표 90% | 100.00% | 94.92% | 9 / 215 / 0 / 12 | 0.075077 | 0.682330 |
+| V2 — OOF 목표 80% | 66.67% | 46.19% | 6 / 103 / 3 / 124 | 0.075077 | 0.682330 |
+
+원본은 `logs/secom/v2/v2_recall90_existing_test/`, `logs/secom/v2/v2_recall80_existing_test/`의 평가 JSON·CSV입니다. 재학습·문턱 변경 없이 평가했으나 과거 V1 결과를 참고한 개발 이력이 있어 완전 미사용 독립 Test는 아닙니다. [V2 Model Card 5.1절](../docs/secom/model_card_v2.md#51-기존-v1-test-구간의-후속-평가)을 참고하세요.
+
 ### CSV 필드 읽는 방법
 
 - 비율은 0~1입니다. `0.9`는 90%이며 `target_recall`은 목표, `recall`은 이후 개발 구간에서 실제 관측한 값입니다.
@@ -58,6 +70,7 @@ GitHub에서 확인할 수 있도록 기존 로컬 결과의 집계값만 보존
 | --- | --- | --- |
 | `secom/figures/eda/step3/` | 클래스 비율·결측률·시간 분포 | 데이터·split 점검 |
 | `secom/figures/exploratory/` | Day 3 PCA·중요도·센서 수/AP, 분석 미리보기 | 초기 탐색 기록 |
+| `secom/figures/exploratory/team_proposal/` | 팀원 브랜치의 원본 그림 6개 | 제안 당시 이력, 보완 코드·최종 V2 평가 결과 아님 |
 | `secom/figures/v1/m3_policy80_40_diagnostics/` | OOF와 시간 검증 확률 분포 | V1 문턱 진단 |
 | `secom/figures/v1/m3_selected_sensor_drift/` | 선택 센서 drift | V1 분포 진단 |
 | `secom/figures/v1/m3_sensor_detail/` | 센서 상세·월별 변화·drift | V1 상세 진단 |
@@ -79,6 +92,49 @@ GitHub에서 확인할 수 있도록 기존 로컬 결과의 집계값만 보존
 - [V2 기간별 분포](secom/figures/v2/v2_sensor_class_distribution/class_distribution_by_period.png)
 
 중요도 상위 20개 진단 그림은 저장 모델의 고정 센서 목록과 같다고 가정하지 않는다. 저장 모델 목록은 [V2 Model Card](../docs/secom/model_card_v2.md)를 따른다. 탐색·V1·V2 그림을 같은 모델의 최종 성능 근거로 혼용하지 않는다.
+
+### 최종 그림·발표 점검 — 2026-10-09
+
+저장 V2의 기존 Test 예측 로그로 그림을 생성했습니다. 평가 기록의 지표와 236행의 정답·판정 및 두 시나리오의 공통 확률을 검증했으며 재학습·Test 재예측·문턱 변경은 하지 않았습니다.
+
+- [90%·80% 시나리오 혼동행렬](secom/figures/v2/existing_test/confusion_matrices.png)
+- [공통 PR 곡선 및 두 문턱의 위치](secom/figures/v2/existing_test/precision_recall_curve.png)
+
+PR 곡선은 같은 모델의 곡선 하나이며 전체 범위와 정밀도 0~20% 확대를 함께 표시합니다. AP는 0.075077이고 기본 불량 비율은 9/236=3.81%입니다. 발표 자료는 딥러닝 완료 후 작성합니다.
+
+그림 재생성 명령 (기존 그림 보존을 위해 새 출력 폴더 지정):
+
+```powershell
+python -m src.sensor_ml.diagnostics.plot_v2_test `
+  --recall90-dir logs/secom/v2/v2_recall90_existing_test `
+  --recall80-dir logs/secom/v2/v2_recall80_existing_test `
+  --figure-dir reports/secom/figures/v2/existing_test_run2
+```
+
+발표에서는 평가 범위(구간별 재선택 824행 / 고정 모델 개발 272행 / 기존 Test 236행)를 반드시 구분합니다. 100% Recall만 강조하지 않고 선별 94.92%와 불량 9건의 소표본 한계를 함께 표기합니다. 개발 Recall 88.89%를 Test 성능으로 표시하거나, 팀원 초기 그림을 저장 V2 성능으로 사용하지 않습니다.
+
+실제 이미지 점검에서 `team_proposal/day3_feature_importance.png`의 x축이 `|Logistic Regression Coefficient|`로 남아 있는 것을 확인했습니다. LightGBM gain 제안의 중요도 그림으로 설명할 때 축 의미가 맞지 않으므로, 원본 이력으로만 보존하고 발표에 그대로 쓰지 않습니다. `v2_sensor_importance/feature_importance_top20.png`도 전체 센서 진단 모델의 중요도이며 저장된 고정 센서 20개 목록을 뜻하지 않습니다.
+
+### 전체 센서·고정 Top-20의 동일 Test 비교
+
+같은 학습 824행·XGBoost 깊이 2·규제 1·300 trees·클래스 비율 가중치로 준비한 전체 센서 기준과 저장 고정 Top-20을 비교합니다. 문턱은 각 모델의 동일 Train 내부 OOF 구간에서 따로 선택했습니다. Test는 동일한 236행·불량 9행입니다.
+
+- [OOF 목표 80%의 혼동행렬 비교](secom/figures/v2/all_vs_fixed20_existing_test/confusion_recall80.png)
+- [OOF 목표 90%의 혼동행렬 비교](secom/figures/v2/all_vs_fixed20_existing_test/confusion_recall90.png)
+- [전체 센서·Top-20 PR 곡선 비교](secom/figures/v2/all_vs_fixed20_existing_test/precision_recall_comparison.png)
+- [공개용 비교 수치](secom/results/v2_existing_test_comparison.csv)
+
+전체 센서 AP는 0.065251, Top-20 AP는 0.075077입니다. Top-20은 검출도 많고 선별 비율도 높습니다. 같은 OOF 목표를 적용했지만 실제 Test Recall은 달라 동일 Recall에서의 선별 부담 비교로 주장하지 않습니다. 기존 Test 재사용 비교이며 그림 생성은 저장 예측 로그만 재사용했습니다. 근거 로그는 `logs/secom/v2/v2_all_vs_fixed20_existing_test/`입니다.
+
+재생성할 때는 다음 명령의 그림 폴더를 새 이름으로 지정합니다.
+
+```powershell
+python -m src.sensor_ml.diagnostics.plot_sensor_test_compare `
+  --all-result-dir logs/secom/v2/v2_all_vs_fixed20_existing_test `
+  --top20-recall80-dir logs/secom/v2/v2_recall80_existing_test `
+  --top20-recall90-dir logs/secom/v2/v2_recall90_existing_test `
+  --figure-dir reports/secom/figures/v2/all_vs_fixed20_existing_test_run2
+```
 
 ### 결과 생성 규칙
 

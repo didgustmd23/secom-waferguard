@@ -32,6 +32,7 @@ data/raw/
 !/reports/secom/results/v2_sensor_comparison.csv
 !/reports/secom/results/v2_fixed_scenarios.csv
 !/reports/secom/results/v2_bundle_verification.csv
+!/reports/secom/results/v2_existing_test_comparison.csv
 *.xls
 
 # 재생성 가능한 split 생성 계약 (원본·설정으로 다시 생성)
