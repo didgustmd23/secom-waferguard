@@ -1,6 +1,6 @@
 # WaferGuard 소스 구성
 
-프로젝트 영역은 SECOM 머신러닝, 전처리 에이전트, WM-811K 딥러닝으로 나눕니다. 실제 구현은 SECOM과 재사용 코어이며 나머지 두 폴더는 구현 전 예약 영역입니다. 설계 안내는 이 문서에 통합합니다.
+프로젝트 영역은 SECOM 머신러닝, 전처리 에이전트, WM-811K 딥러닝으로 나눕니다. SECOM·재사용 코어와 WM canonical 산출물 검증기가 구현되어 있으며, 에이전트와 WM 모델 학습은 구현 전입니다. 설계 안내는 이 문서에 통합합니다.
 
 ```text
 src/
@@ -13,7 +13,7 @@ src/
 │   ├── evaluation/
 │   └── verification/
 ├── agents/           # 전처리 작업 관리 예정 영역
-└── wafer_dl/         # 맵 처리·딥러닝 예정 영역
+└── wafer_dl/         # canonical 검증기·맵 처리·딥러닝 영역
 ```
 
 맵 처리 함수와 딥러닝은 [wm811k](README.md#wm-811k-맵-처리와-딥러닝), 작업 실행·상태·재시도 관리는 [agents](README.md#전처리-에이전트)에서 분리합니다. SECOM 코드는 이 두 영역에 의존하지 않습니다. 현재 코어는 표 형태·이진 분류 계약이며 WM 다중 분류의 지표·맵 변환을 그대로 처리한다고 가정하지 않습니다.
@@ -122,7 +122,11 @@ from src.sensor_ml.experiments.time_weight_compare import build_weight_candidate
 
 ## WM-811K 맵 처리와 딥러닝
 
-아직 데이터 준비·딥러닝 학습 모듈을 구현하지 않았습니다. `src/wafer_dl/`는 웨이퍼맵 전처리 함수와 다중 분류 모델·학습·평가·추론 코드를 둘 영역입니다.
+`src/wafer_dl/validate_canonical.py`는 변환된 NPZ·manifest 정합성, 중복·Lot 연결 그룹의 분할 필요조건을 검사합니다. 원본 pickle을 읽거나 데이터를 수정하지 않습니다. 실행 안내는 [Sandbox 준비·산출물 검증](../docs/WM811K/SANDBOX_SETUP.md#6-호스트에서-변환-산출물-검증)에 있습니다.
+
+`split.py`는 충돌 맵 전체 격리와 Lot·동일 맵 그룹 분할을 담당합니다. [그룹 분할 실행](../docs/WM811K/GROUP_SPLIT.md)을 참고하세요. `transform.py`는 NumPy 기반 결정적 resize·padding·2채널 생성을, `check_transform.py`는 Train/Validation의 패턴 보존 검사를 담당합니다. [변환 검사 실행](../docs/WM811K/TRANSFORM_CHECK.md)을 참고하세요. `cache.py`와 `dataset.py`는 숫자 전용 입력 캐시와 PyTorch 첫 배치 검사를 담당합니다. [캐시·Dataset 실행](../docs/WM811K/CACHE_DATASET.md)은 실제 데이터에서 별도로 수행하며, 딥러닝 학습 모듈은 아직 미구현입니다.
+
+`src/wafer_dl/eda.py`는 노트북·CLI·향후 에이전트가 공유하는 EDA 코어입니다. `reports/wm811k/analysis.ipynb`에서 분포·클래스·Lot·중복 집계와 원본 크기 예시를 로컬로 확인합니다. 에이전트는 나중에 `run_eda(input_dir, output_dir)`를 호출할 수 있으며 반환값은 로컬 실행 상태뿐입니다. 기존 LLM DTO·허용 동작에 자동 등록하지 않았고, 실제 에이전트 실행기는 아직 미구현입니다. 집계·그림·경로는 외부 LLM·추적에 전달하지 않습니다.
 
 | 영역 | 예정 모듈 | 담당 |
 | --- | --- | --- |

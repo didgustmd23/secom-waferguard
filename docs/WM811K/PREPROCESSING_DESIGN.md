@@ -75,7 +75,7 @@ RAM이 부족하거나 구버전 객체가 로드되지 않으면 중단하고, 
 | 7 | Random |
 | 8 | Scratch |
 
-`None`은 문자열 클래스명이다. Python `None`, JSON `null`, 빈 배열, 빈 문자열, 결측값과 구분한다. 원본의 단일 원소 중첩 배열은 구조를 검증한 뒤 스칼라로 풀고, 명시한 별칭만 정규화한다. 예: `none`→`None`. 알 수 없는 이름과 복수 라벨은 조용히 첫 원소만 채택하지 않고 격리한다. 미라벨에는 `class_index=null`을 유지한다.
+`None`은 문자열 클래스명이다. Python `None`, JSON `null`, 빈 배열, 빈 문자열, 결측값과 구분한다. 원본의 단일 원소 중첩 배열은 구조를 검증한 뒤 스칼라로 풀고, 명시한 별칭만 정규화한다. 별칭은 `none`→`None`, `Near-full`→`Near-Full`이다. 알 수 없는 이름과 복수 라벨은 조용히 첫 원소만 채택하지 않고 격리한다. 미라벨에는 `class_index=null`을 유지한다.
 
 ### 4.2 Manifest 필드
 
@@ -177,6 +177,8 @@ RAM이 부족하거나 구버전 객체가 로드되지 않으면 중단하고, 
 모든 위치에서 `defect_mask <= valid_mask`여야 한다. 색상으로 렌더링한 보고서 PNG를 CNN 원본으로 다시 읽지 않는다. 컬러맵·축·제목·라벨 텍스트가 모델 입력에 섞이지 않도록 한다.
 
 ### 7.2 Resize와 padding
+
+구현 보완: 현재 [transform.py](../../src/wafer_dl/transform.py)는 PyTorch 없이 실행 가능한 `numpy_half_pixel_nearest_v1`을 명시적으로 사용합니다. 아래 `nearest-exact`는 원래의 PyTorch 제안이며 현재 실행 backend가 아닙니다. 좌표·반올림·padding 규칙과 검증 범위는 [입력 변환 검사](TRANSFORM_CHECK.md)에 기록합니다. 미설치 PyTorch와의 런타임 정합성을 검증했다고 간주하지 않습니다. 입력 캐시·Tensor Dataset은 후속 단계입니다.
 
 1. 최초 기준에서는 원본 배열을 crop하지 않는다. 웨이퍼 중심·경계·notch 정보를 임의 정렬하지 않는다.
 2. 목표 크기 `(T_h,T_w)`에 대해 `s=min(T_h/H,T_w/W)`를 구한다.

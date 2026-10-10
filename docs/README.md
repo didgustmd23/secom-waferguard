@@ -8,13 +8,19 @@ WaferGuard는 전처리 에이전트, SECOM 머신러닝, WM-811K 딥러닝의 �
 | 전처리 에이전트 | [기초 설계](agents/AGENT_BASIC_DESIGN.md), [상세 설계](agents/AGENT_DETAILED_DESIGN.md) | 최소 상태·제한적 도구 선택·승인·격리, OWASP 보안 검증 계획 |
 | WM-811K 딥러닝 | [WM-811K 기초 설계 7절](WM811K/WM811K_BASIC_DESIGN.md#7-wm-딥러닝--이종수) | 작은 CNN·ResNet18 학습·평가 설계 |
 
-에이전트와 WM 딥러닝은 아직 설계 단계이며, 두 데이터셋의 학습·평가는 독립적으로 수행한다. 예정 소스·의존성·폴더는 구현된 것으로 취급하지 않는다.
+WM 전처리의 검증·분할·변환·캐시·Dataset 코드는 구현했으며, 사용자 실행 결과 기준 Train·Validation 캐시와 첫 배치 검사를 완료했다. Test 캐시와 WM 모델 학습·평가는 아직 진행하지 않았으며 두 데이터셋의 학습·평가는 독립적으로 수행한다. 예정 기능은 구현된 것으로 취급하지 않는다.
 
 전체 기한은 **2026-11-05**다. [프로젝트 마무리 일정](PROJECT_SCHEDULE.md)에 전처리(10/12~10/18), 에이전트(10/19~10/25), 테스트·보고서·발표자료 준비(10/26~11/05)의 완료 기준을 정리한다.
 
 ## WM-811K 문서
 
-WM 전처리를 새로 시작할 때는 [전처리 상세 설계](WM811K/PREPROCESSING_DESIGN.md)를 먼저 참고한다. 원본 읽기·품질 검사·중복/Lot 분할·2채널 입력·캐시·학습 담당자 전달 규격을 정리했으며 아직 구현 전 설계안이다. 전체 역할과 딥러닝 모델 범위는 [기초 설계](WM811K/WM811K_BASIC_DESIGN.md)에 유지한다.
+- [입력 캐시·PyTorch Dataset](WM811K/CACHE_DATASET.md): 처리 흐름·분할 컬럼·학습 연결·실행 명령. 사용자 실행 기준 Train·Validation 첫 배치 통과 기록과 Test 별도 준비 방법을 포함합니다.
+- [입력 변환·패턴 보존 검사](WM811K/TRANSFORM_CHECK.md): 128 입력·2채널·Train/Validation 검사·노트북 결과 확인. Test 배열은 검사 대상에서 제외합니다.
+- [충돌 제외·그룹 분할 실행](WM811K/GROUP_SPLIT.md): 설정·명시적 승인·실행 명령·파생 manifest 계약. 코드와 합성 테스트 준비 완료, 실제 분할 실행은 별도입니다.
+- [EDA 해설 보고서](../reports/wm811k/report.md): analysis.ipynb의 분포·상관관계·패턴 예시 해석.
+- [Sandbox 오프라인 환경 준비](WM811K/SANDBOX_SETUP.md): 최초 읽기를 위한 설치 파일·wheel·읽기 전용 공유 설정의 준비 이력.
+
+WM 전처리를 새로 시작할 때는 [전처리 상세 설계](WM811K/PREPROCESSING_DESIGN.md)를 먼저 참고한다. 원본 읽기·품질 검사·중복/Lot 분할·2채널 입력·캐시·학습 담당자 전달 규격을 정리했으며, 실제 구현 범위와 실행 방법은 위 단계별 문서를 따른다. 전체 역할과 딥러닝 모델 범위는 [기초 설계](WM811K/WM811K_BASIC_DESIGN.md)에 유지한다.
 
 ## SECOM 문서
 
