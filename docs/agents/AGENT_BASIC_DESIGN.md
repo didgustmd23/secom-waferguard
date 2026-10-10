@@ -80,6 +80,10 @@ ingest → audit
            ├── 필수 검사 실패 → blocked_input
            └── 통과
                  ↓
+             run_eda
+                 ↓
+             review_eda ── 미확인/문제 → awaiting_approval
+                 ↓ 사용자 확인
              propose_split
                  ↓
              approve_split ── 거부/수정 → awaiting_approval / cancelled
